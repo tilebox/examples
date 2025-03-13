@@ -1,0 +1,11 @@
+[project]
+name = "workflows-hello-world-py"
+version = "0.1.0"
+description = "Tilebox Workflows Hello World, Python"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "httpx>=0.28.1",
+    "python-dotenv>=1.0.1",
+    "tilebox-workflows>=0.32.1",
+]
