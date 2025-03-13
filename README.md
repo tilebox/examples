@@ -20,4 +20,7 @@ List of examples:
 
 **Workflows**
 
-- Workflows Hello World, Python [folder](/workflows-hello-world-py/)
+- [Workflows Hello World, Python](/workflows-hello-world-py/)  
+A simple example that demonstrates how to use the Tilebox SDKs to submit a job and run a worker.
+- [Workflows Cron Automation, Python](/workflows-cron-automation-py/)  
+A simple example that demonstrates how to use the Tilebox SDKs to create a Workflows Cron Automation, a workflow that runs on a schedule.
