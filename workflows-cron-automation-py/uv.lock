@@ -943,7 +943,7 @@ wheels = [
 ]
 
 [[package]]
-name = "workflows-hello-world-py"
+name = "workflows-cron-automation-py"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [

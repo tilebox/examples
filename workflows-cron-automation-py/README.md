@@ -23,3 +23,7 @@ uv run python cron_automation.py
 ```
 
 Check the Automations tab in the [Tilebox Console](https://console.tilebox.com/workflows/automations) to see the automation in action, including all created jobs.
+
+## Cleanup
+
+To delete the automation, go to [https://console.tilebox.com/workflows/automations](https://console.tilebox.com/workflows/automations) and delete the automation.

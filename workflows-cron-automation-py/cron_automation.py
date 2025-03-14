@@ -7,14 +7,16 @@ import xarray as xr
 from tilebox.datasets import Client as DSClient
 from tilebox.datasets.data import TimeInterval
 from tilebox.workflows import Client as WFClient
+from tilebox.workflows.observability.logging import get_logger
 from tilebox.workflows.automations import CronTask
 from tilebox.workflows.data import AutomationPrototype
 
 dotenv.load_dotenv()
 
-
 dsClient = DSClient()
 wfClient = WFClient()
+
+logger = get_logger()
 
 
 # S2Stats prints statistics of Sentinel 2 tasks of a configurable preceding time
@@ -35,26 +37,17 @@ class S2Stats(CronTask):
         s2c = ds.collection("S2C_S2MSI2A").load(time_interval)
 
         # Assemble all collections into a single dataset
-        data = None
-        if s2a != 0:  # if dataset is nonempty
-            data = s2a
-        if s2b != 0:
-            if data:
-                data = xr.concat([data, s2b], dim="time")
-            else:
-                data = s2b
-        if s2c != 0:
-            if data:
-                data = xr.concat([data, s2c], dim="time")
-            else:
-                data = s2c
+        non_empty = [ds for ds in (s2a, s2b, s2c) if ds]  # filter out empty datasets
+        data = (
+            xr.concat(non_empty, dim="time") if non_empty else None
+        )  # combine datasets
 
-        print(f"Stats for {self.duration_hours}h preceding {self.trigger.time}")
+        logger.info(f"Stats for {self.duration_hours}h preceding {self.trigger.time}")
         if data:
-            print(f" Number of granules: {len(data.time)}")
-            print(f" Average cloudiness: {data.cloud_cover.mean(dim="time").values} %")
+            logger.info(f" Number of granules: {len(data.time)}")
+            logger.info(f" Average cloudiness: {data.cloud_cover.mean(dim='time').values} %")
         else:
-            print(" No data loaded")
+            logger.info(" No data loaded")
 
     @staticmethod
     def identifier() -> tuple[str, str]:
@@ -82,12 +75,12 @@ def main():
             cluster,  # cluster slug to submit jobs to
             max_retries=3,
         )
-        print(f"Created cron automation {cron_automation.name}")
+        logger.info(f"Created cron automation {cron_automation.name}")
     else:
-        print("Cron automation already exists")
+        logger.info("Cron automation already exists")
 
     # Start the workflow runner and wait for incoming tasks
-    print("Starting workflow runner")
+    logger.info("Starting workflow runner")
     wfClient.runner(cluster, [S2Stats]).run_forever()
 
 
