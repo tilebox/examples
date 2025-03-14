@@ -1,7 +1,8 @@
-from datetime import timedelta
+from datetime import datetime, timedelta
 import os
 from typing import List
 
+from shapely import box
 import dotenv
 import xarray as xr
 from tilebox.datasets import Client as DSClient
@@ -11,12 +12,33 @@ from tilebox.workflows.observability.logging import get_logger
 from tilebox.workflows.automations import CronTask
 from tilebox.workflows.data import AutomationPrototype
 
-dotenv.load_dotenv()
 
+import xarray as xr
+from shapely import box
+
+# setup environment
+dotenv.load_dotenv()
 dsClient = DSClient()
 wfClient = WFClient()
-
 logger = get_logger()
+
+
+# aois defines the areas of interest, for which statistics are calculated
+aois = {
+    "Switzerland": box(6.0, 45.0, 10.5, 48),
+    "USA": box(-180, 12.0, -40, 72.2),
+}
+
+
+# filter_for_aoi filters a dataset and removes all entries out of the AOI, using the geometry property of Sentinel 2 metadata
+# The geometry property is a shapely.geometry.Polygon object
+def filter_for_aoi(aoi: box, data: xr.Dataset) -> xr.Dataset:
+    copy = data.copy()
+    bools = [aoi.intersects(x) for x in copy.geometry.values]
+    return copy.where(
+        xr.DataArray(bools, coords=copy.geometry.coords, dims=copy.geometry.dims),
+        drop=True,
+    )
 
 
 # S2Stats prints statistics of Sentinel 2 tasks of a configurable preceding time
@@ -40,20 +62,28 @@ class S2Stats(CronTask):
         non_empty = [ds for ds in (s2a, s2b, s2c) if ds]  # filter out empty datasets
         data = (
             xr.concat(non_empty, dim="time") if non_empty else None
-        )  # combine datasets
+        )
 
-        logger.info(f"Stats for {self.duration_hours}h preceding {self.trigger.time}")
-        if data:
-            logger.info(f" Number of granules: {len(data.time)}")
-            logger.info(f" Average cloudiness: {data.cloud_cover.mean(dim='time').values} %")
-        else:
-            logger.info(" No data loaded")
+        # Print statistics for each AOI
+        logger.info(f"Stats for {self.duration_hours}h preceding {self.trigger.time}:")
+        for name, aoi in aois.items():
+            filtered = filter_for_aoi(aoi, data)
+
+            logger.info(f" {name}:")
+            if data:
+                logger.info(f"  Number of granules: {len(filtered.time)}")
+                logger.info(
+                    f" Average cloudiness: {filtered.cloud_cover.mean(dim='time').values:.2f}%"
+                )
+            else:
+                logger.info(" No data found")
 
     @staticmethod
     def identifier() -> tuple[str, str]:
         return "tilebox.com/example/S2Stats", "v1.0"
 
 
+# automation_exists checks if an automation with the given display name is already registered within Tilebox
 def automation_exists(name: str, automations: List[AutomationPrototype]) -> bool:
     return any(automation.name == name for automation in automations)
 
