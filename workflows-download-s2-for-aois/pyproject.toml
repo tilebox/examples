@@ -1,0 +1,15 @@
+[project]
+name = "workflows-cron-automation-py"
+version = "0.1.0"
+description = "Tilebox Workflows Cron Automation, Python"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.2.3",
+    "python-dotenv>=1.0.1",
+    "scipy>=1.15.2",
+    "shapely>=2.0.7",
+    "tilebox-datasets>=0.32.1",
+    "tilebox-storage>=0.32.1",
+    "tilebox-workflows>=0.32.1",
+]
