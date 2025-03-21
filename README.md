@@ -24,3 +24,8 @@ List of examples:
 A simple example that demonstrates how to use the Tilebox SDKs to submit a job and run a worker.
 - [Workflows Cron Automation, Python](/workflows-cron-automation-py/)  
 A simple example that demonstrates how to use the Tilebox SDKs to create a Workflows Cron Automation, a workflow that runs on a schedule, and showcases how to filter timeseries Datasets based on spatial and temporal criteria.
+
+**Mixed**
+
+- [Download S2 Data for Points of Interest, Python](/workflows-download-s2-for-aois/)  
+A more complex example that demonstrates how to use the Tilebox SDKs to create a Workflows to find Sentinel-2 data for a set of points of interest (POIs), filter the data to be as cloud-free as possible and finally download the data.
