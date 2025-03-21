@@ -3,6 +3,7 @@ from collections import defaultdict
 import numpy as np
 import shapely
 import xarray as xr
+from tilebox.workflows.observability.logging import get_logger
 
 
 # haversine_distance_km calculates the great-circle distance between two points on a sphere using the haversine formula
@@ -74,6 +75,8 @@ def precise_aoi_filter(coords: xr.Dataset, data: xr.Dataset) -> xr.Dataset:
 
 # select_least_cloudy_granules finds the granules that contain the point of interest with the lowest cloud cover
 def select_least_cloudy_granules(coords: xr.Dataset, data: xr.Dataset) -> xr.Dataset:
+    logger = get_logger()
+
     # granule_indices_by_point contains granules that contain the point of interest
     granule_indices_by_point = defaultdict(list)
     # cloud_cover_by_point contains the cloud cover of each of the above granules that contains the point of interest
@@ -95,18 +98,18 @@ def select_least_cloudy_granules(coords: xr.Dataset, data: xr.Dataset) -> xr.Dat
 
     # Find the granule with the lowest cloud cover for each point of interest
     for point_index, cloud_coverages in cloud_cover_by_point.items():
-        # logger.info(f"Point {point_index} has {len(cloud_coverages)} granules")
-        # logger.info(f"  Cloud covers (limited to 5 values):")
-        # for granule_index, cloud_cover in enumerate(cloud_coverages)[:5]:
-        #     granule = data.isel(time=granule_indices_by_point[point_index][granule_index])
-        # logger.info(f"    {granule_index}: {granule.id.values}: {cloud_cover}")
+        logger.debug(f"Point {point_index} has {len(cloud_coverages)} granules")
+        logger.debug(f"  Cloud covers (limited to 5 values):")
+        for granule_index, cloud_cover in enumerate(cloud_coverages)[:5]:
+            granule = data.isel(time=granule_indices_by_point[point_index][granule_index])
+            logger.debug(f"    {granule_index}: {granule.id.values}: {cloud_cover}")
 
         min_cloud_cover_index = np.argmin(cloud_coverages)
         selected_granule = granule_indices_by_point[point_index][min_cloud_cover_index]
         granules.add(selected_granule)
-        # logger.info(f"  Selected granule with cloud cover {cloud_coverages[min_cloud_cover_index]}")
-        # logger.info(f"  POI Coordinates: {coords.isel(index=point_index).lat.values}, {coords.isel(index=point_index).lon.values}")
-        # logger.info(f"  Granule Center: {data.center.isel(time=selected_granule).values}")
+        logger.debug(f"  Selected granule with cloud cover {cloud_coverages[min_cloud_cover_index]}")
+        logger.debug(f"  POI Coordinates: {coords.isel(index=point_index).lat.values}, {coords.isel(index=point_index).lon.values}")
+        logger.debug(f"  Granule Center: {data.center.isel(time=selected_granule).values}")
 
     # Return the granules from our set
     return data.isel(time=list(granules))
