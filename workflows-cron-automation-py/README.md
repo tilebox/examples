@@ -1,6 +1,6 @@
 # Workflows Cron Automation, Python
 
-This example demonstrates how to use the [Tilebox](https://tilebox.com) SDKs to create a Workflows Cron Automation, a workflow that runs on a schedule.
+This example demonstrates how to use the [Tilebox](https://tilebox.com) SDKs to create a Workflows Cron Automation, a workflow that runs on a schedule, and showcases how to filter timeseries Datasets based on spatial and temporal criteria.
 
 The example uses the [Tilebox Sentinel 2 Open Dataset](https://console.tilebox.com/datasets/explorer/0190bbe6-1215-a90d-e8ce-0086add856c2) and a [Cron Automation](https://docs.tilebox.com/workflows/near-real-time/cron) to load Sentinel-2 data and print statistics every minute.
 
