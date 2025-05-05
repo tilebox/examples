@@ -1,115 +1,45 @@
-from collections import defaultdict
-
 import numpy as np
-import shapely
 import xarray as xr
+from shapely import Polygon
 from tilebox.workflows.observability.logging import get_logger
 
 
-# haversine_distance_km calculates the great-circle distance between two points on a sphere using the haversine formula
-# This is used for performant, rough filtering of Sentinel 2 granules
-def haversine_distance_km(
-        coords_a_lat_lon: list | tuple, coords_b_lat_lon: list | tuple
-) -> float:
-    """
-    Calculates the great-circle distance between two points on a sphere
-    using the haversine formula
-
-    More information: https://www.movable-type.co.uk/scripts/latlong.html
-
-    Args:
-        coords_a_lat_lon: coordinates of the first point (lat1, lon1)
-        coords_b_lat_lon: coordinates of the second point (lat1, lon1)
-    Returns:
-        haversine distance between the two defined points in km
-    """
-    EARTH_RADIUS_METER = 6371000
-    lat1, lon1 = coords_a_lat_lon[0], coords_a_lat_lon[1]
-    lat2, lon2 = coords_b_lat_lon[0], coords_b_lat_lon[1]
-
-    phi1 = np.radians(lat1)
-    phi2 = np.radians(lat2)
-    delta_phi = np.radians(lat2 - lat1)
-    delta_lambda = np.radians(lon2 - lon1)
-
-    a = np.sin(delta_phi / 2) * np.sin(delta_phi / 2) + np.cos(phi1) * \
-        np.cos(phi2) * np.sin(delta_lambda / 2) * np.sin(delta_lambda / 2)
-    c = 2 * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
-
-    distance_m = EARTH_RADIUS_METER * c
-
-    return distance_m / 1000  # haversine distance in km
-
-
-# preliminary_filter filters a dataset and removes all entries out of the AOI, using the center property of Sentinel 2
-# metadata. We know Sentinel 2 granules are around 100km in width, so using 150km as a buffer is sufficient to cover
-# the whole granule. Not all granules that are returned here will contain the coordinates of the AOI
-def rough_aoi_filter(coords: xr.Dataset, data: xr.Dataset) -> xr.Dataset:
-    data["match"] = xr.DataArray(np.zeros(len(data.time)), dims=("time",))
-    for lon, lat in zip(coords.lon.values, coords.lat.values):
-        distances_km = haversine_distance_km(data.center.T, (lat, lon))
-        nearby = (distances_km < 150)  # find granules within 150km of our point of interest
-        data["match"] = xr.where(nearby, 1, data["match"])
-
-    filtered = data.where(data["match"] == 1, drop=True)
-    filtered = filtered.drop_vars("match")
-    return filtered
-
-
-# filter_for_coords filters a dataset and removes all entries out of the AOI, using the geometry property of Sentinel 2
-# metadata. This filter is precise, as it uses the actual geometry of the granule to determine if it contains the
-# coordinates ofthe AOI
-def precise_aoi_filter(coords: xr.Dataset, data: xr.Dataset) -> xr.Dataset:
-    intersects = np.zeros(len(data.geometry.values), dtype=bool)
-    for i, granule in enumerate(data.geometry.values):
-        for lon, lat in zip(coords.lon.values, coords.lat.values):
-            contained = shapely.contains_xy(granule, lon, lat)
-            if contained:
-                intersects[i] = True
-                break
-    return data.where(
-        xr.DataArray(intersects, coords=data.geometry.coords, dims=data.geometry.dims),
-        drop=True,
+def polygon_from_poi(lon: float = 0.0, lat: float = 0.0) -> Polygon:
+    return Polygon(
+        [
+            (lon - 0.1, lat - 0.1),
+            (lon - 0.1, lat + 0.1),
+            (lon + 0.1, lat + 0.1),
+            (lon + 0.1, lat - 0.1),
+            (lon - 0.1, lat - 0.1),
+        ]
     )
 
 
 # select_least_cloudy_granules finds the granules that contain the point of interest with the lowest cloud cover
-def select_least_cloudy_granules(coords: xr.Dataset, data: xr.Dataset) -> xr.Dataset:
+def select_least_cloudy_granules(data: xr.Dataset) -> xr.Dataset:
     logger = get_logger()
 
-    # granule_indices_by_point contains granules that contain the point of interest
-    granule_indices_by_point = defaultdict(list)
-    # cloud_cover_by_point contains the cloud cover of each of the above granules that contains the point of interest
-    cloud_cover_by_point = defaultdict(list)
+    coordinate_indices = np.unique(data.coordinate_idx.values)
 
-    # For each point of interest, find all granules that contain it
-    for point_index in range(len(coords.index)):
-        for granule_index, granule_geometry in enumerate(data.geometry.values):
-            contained = shapely.contains_xy(granule_geometry,
-                                            coords.lon.isel(index=point_index).values,
-                                            coords.lat.isel(index=point_index).values)
-            if contained:
-                granule_indices_by_point[point_index].append(granule_index)
-                cloud_cover_by_point[point_index].append(data.cloud_cover.isel(time=granule_index).values)
+    result = None
 
-    # Deduplication of granules.
-    # If a granule is the best granule for multiple points, we want to keep it only once
-    granules = set()
+    # for each point of interest, find the granule with the lowest cloud cover
+    for i in coordinate_indices:
+        poi_data = data.where(data.coordinate_idx == i, drop=True)
+        logger.debug(f"Coordinate {i:.0f} has {len(poi_data.time)} valid granules")
 
-    # Find the granule with the lowest cloud cover for each point of interest
-    for point_index, cloud_coverages in cloud_cover_by_point.items():
-        logger.debug(f"Point {point_index} has {len(cloud_coverages)} granules")
+        poi_data = poi_data.sortby("cloud_cover")
+        logger.debug(f"  Sorted by cloud cover")
         logger.debug(f"  Cloud covers (limited to 5 values):")
-        for granule_index, cloud_cover in enumerate(cloud_coverages)[:5]:
-            granule = data.isel(time=granule_indices_by_point[point_index][granule_index])
+        for granule_index, cloud_cover in enumerate(poi_data.cloud_cover.values):
+            granule = poi_data.isel(time=granule_index)
             logger.debug(f"    {granule_index}: {granule.id.values}: {cloud_cover}")
+            if granule_index >= 5:
+                break
+        logger.debug(f"  Selected granule 0 with cloud cover {poi_data.cloud_cover.values[0]}")
 
-        min_cloud_cover_index = np.argmin(cloud_coverages)
-        selected_granule = granule_indices_by_point[point_index][min_cloud_cover_index]
-        granules.add(selected_granule)
-        logger.debug(f"  Selected granule with cloud cover {cloud_coverages[min_cloud_cover_index]}")
-        logger.debug(f"  POI Coordinates: {coords.isel(index=point_index).lat.values}, {coords.isel(index=point_index).lon.values}")
-        logger.debug(f"  Granule Center: {data.center.isel(time=selected_granule).values}")
+        # Select the granule with the lowest cloud cover and add it to the result
+        result = xr.concat([result, poi_data.isel(time=0)], dim="time") if result else poi_data.isel(time=0)
 
-    # Return the granules from our set
-    return data.isel(time=list(granules))
+    return result
