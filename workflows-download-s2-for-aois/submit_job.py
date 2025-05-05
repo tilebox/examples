@@ -20,11 +20,11 @@ job = jc.submit(
     "download-s2",
     DownloadWorkflow(
         start="2022-01-01",
-        end="2022-01-07",
+        end="2022-12-31",
         coords_path="coords.csv",
         download=False,
     ),
     cluster=cluster,
-    max_retries=3
+    max_retries=3,
 )
 logger.info(f"Job submitted with ID {job.id}")
