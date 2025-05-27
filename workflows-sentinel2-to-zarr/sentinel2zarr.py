@@ -251,47 +251,55 @@ class GranuleProductToZarr(Task):
         variable_name = Path(self.product_location).stem.split("_")[-2]  # B02, B03, B04 or SCL
         context.current_task.display = f"ProductToZarr({variable_name})"  # type: ignore[attr-defined]
 
-        logger.info(f"Reading product {self.product_location}")
+        tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
+        with tracer.start_span("read_product"):
+            logger.info(f"Reading product {self.product_location}")
 
-        with BytesIO() as buffer:
-            object_hash = md5()  # noqa: S324
-            for chunk in sentinel2_data_store().get(self.product_location):
-                buffer.write(chunk)
-                object_hash.update(chunk)
+            with BytesIO() as buffer:
+                object_hash = md5()  # noqa: S324
+                for chunk in sentinel2_data_store().get(self.product_location):
+                    buffer.write(chunk)
+                    object_hash.update(chunk)
 
-            data = buffer.getvalue()
-            logger.info(f"Product read, size={len(data)} bytes, md5={object_hash.hexdigest()}")
+                data = buffer.getvalue()
+                logger.info(f"Product read, size={len(data)} bytes, md5={object_hash.hexdigest()}")
 
-            with rasterio.MemoryFile(data).open(driver="JP2OpenJPEG") as product:
-                arr = product.read(1)
-                src_grid = GeoBox(shape=arr.shape, affine=product.transform, crs=product.crs)
+                with rasterio.MemoryFile(data).open(driver="JP2OpenJPEG") as product:
+                    arr = product.read(1)
+                    src_grid = GeoBox(shape=arr.shape, affine=product.transform, crs=product.crs)
 
-        dataset = xr.Dataset({variable_name: (["y", "x"], arr)})
-        dataset[variable_name] = wrap_xr(dataset[variable_name], gbox=src_grid)  # add source spatial_ref metadata
+        with tracer.start_span("reproject"):
+            dataset = xr.Dataset({variable_name: (["y", "x"], arr)})
+            dataset[variable_name] = wrap_xr(dataset[variable_name], gbox=src_grid)  # add source spatial_ref metadata
 
-        target_grid: GeoBox = pickle.loads(context.job_cache["target_grid"])  # type: ignore[attr-defined]  # noqa: S301
-        target_dataset = dataset.odc.reproject(how=target_grid, resampling=Resampling.nearest, dst_nodata=0)
-        target_dataset = target_dataset.expand_dims(time=1)
-        target_dataset = target_dataset.drop_vars("spatial_ref")  # don't write this to zarr, not needed
+            target_grid: GeoBox = pickle.loads(context.job_cache["target_grid"])  # type: ignore[attr-defined]  # noqa: S301
+            target_dataset = dataset.odc.reproject(how=target_grid, resampling=Resampling.nearest, dst_nodata=0)
+            target_dataset = target_dataset.expand_dims(time=1)
+            target_dataset = target_dataset.drop_vars("spatial_ref")  # don't write this to zarr, not needed
 
-        logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
+            product = _S2_PRODUCTS[variable_name]
+            if product.scale_factor != 1:
+                target_dataset[variable_name] = target_dataset[variable_name] * np.float32(product.scale_factor)
 
-        zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
-        zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
-        target_dataset.to_zarr(
-            zarr_store,  # type: ignore[arg-type]
-            region={
-                "time": slice(self.time_index, self.time_index + 1),
-                "y": slice(0, target_grid.shape.y),
-                "x": slice(0, target_grid.shape.x),
-            },
-            write_empty_chunks=False,
-            safe_chunks=False,  # our grid size is not an exact multiple of chunk size
-            consolidated=False,
-            zarr_format=3,
-        )
+            logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
 
-        logger.info(f"Successfully wrote variable {variable_name} to Zarr datacube")
+        with tracer.start_span("write_zarr"):
+            zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
+            zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
+            target_dataset.to_zarr(
+                zarr_store,  # type: ignore[arg-type]
+                region={
+                    "time": slice(self.time_index, self.time_index + 1),
+                    "y": slice(0, target_grid.shape.y),
+                    "x": slice(0, target_grid.shape.x),
+                },
+                write_empty_chunks=False,
+                safe_chunks=False,  # our grid size is not an exact multiple of chunk size
+                consolidated=False,
+                zarr_format=3,
+            )
+
+            logger.info(f"Successfully wrote variable {variable_name} to Zarr datacube")
 
 
 def main() -> None:
