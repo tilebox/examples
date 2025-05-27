@@ -1,5 +1,7 @@
+import math
 import os
 import pickle
+from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from hashlib import md5
@@ -52,6 +54,7 @@ _S2_PRODUCTS = {
 CACHE_GCS_BUCKET = "workflow-cache-15c9850"
 ZARR_S3_BUCKET = "workflow-cache-35ee674"
 CACHE_PREFIX = "s2-zarr"
+SPATIAL_CHUNK_SIZE = 2048
 
 
 @lru_cache
@@ -154,9 +157,13 @@ class Sentinel2ToZarr(Task):
         initialize_datacube = context.submit_subtask(
             InitializeZarrDatacube(len(locations), geobox.shape.y, geobox.shape.x)
         )
-        context.submit_subtask(
+        read_granules = context.submit_subtask(
             GranulesToZarr((0, len(locations))),
             depends_on=[initialize_datacube],
+        )
+        context.submit_subtask(
+            ComputeMosaic((0, geobox.shape.y), (0, geobox.shape.x)),
+            depends_on=[read_granules],
         )
 
 
@@ -172,10 +179,24 @@ class InitializeZarrDatacube(Task):
         for variable_name, product in _S2_PRODUCTS.items():
             dataset[variable_name] = (
                 ["time", "y", "x"],
-                dask.array.zeros((self.n_time, self.n_y, self.n_x), chunks=(1, 1024, 1024), dtype=product.dtype),
+                dask.array.zeros(
+                    (self.n_time, self.n_y, self.n_x),
+                    chunks=(1, SPATIAL_CHUNK_SIZE, SPATIAL_CHUNK_SIZE),
+                    dtype=product.dtype,
+                ),
             )
             dataset.attrs["long_name"] = product.name
             encodings[variable_name] = {"compressors": (compressor,)}
+
+        dataset["mosaic"] = (
+            ["band", "y", "x"],
+            dask.array.zeros(
+                (3, self.n_y, self.n_x),
+                chunks=(1, SPATIAL_CHUNK_SIZE, SPATIAL_CHUNK_SIZE),
+                dtype=np.float32,
+            ),
+        )
+        encodings["mosaic"] = {"_FillValue": 0, "scale_factor": 1 / 10000, "compressors": (compressor,)}
 
         zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
         zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
@@ -293,6 +314,79 @@ class GranuleProductToZarr(Task):
             logger.info(f"Successfully wrote variable {variable_name} to Zarr datacube")
 
 
+class ComputeMosaic(Task):
+    ys: tuple[int, int]
+    xs: tuple[int, int]
+
+    def execute(self, context: ExecutionContext) -> None:
+        chunks = []
+        for y_start, y_end in _split_interval(*self.ys, SPATIAL_CHUNK_SIZE):
+            for x_start, x_end in _split_interval(*self.xs, SPATIAL_CHUNK_SIZE):
+                chunks.append(((y_start, y_end), (x_start, x_end)))
+
+        if len(chunks) > 1:
+            for chunk in chunks:
+                context.submit_subtask(ComputeMosaic(*chunk))
+
+        (y_start, y_end), (x_start, x_end) = chunks[0]
+        context.current_task.display = f"ComputeMosaic(y={y_start}:{y_end}, x={x_start}:{x_end})"  # type: ignore[attr-defined]
+
+        tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
+
+        zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
+        zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
+        cube = xr.open_zarr(zarr_store, zarr_format=3, consolidated=False)
+
+        valid = cube.SCL[:, y_start:y_end, x_start:x_end].isin([2, 4, 5, 6, 11]).compute()
+
+        for i, band in enumerate(["B04", "B03", "B02"]):  # red, green, blue
+            with tracer.start_span(f"band_{band}"):
+                has_data = cube[band][:, y_start:y_end, x_start:x_end] != 0
+                mosaic_arr = (
+                    cube[band][:, y_start:y_end, x_start:x_end].where(valid & has_data).quantile(0.25, dim="time")
+                    / 10000
+                ).compute()
+                mosaic = xr.Dataset({"mosaic": mosaic_arr}).expand_dims({"band": 1})
+                mosaic.to_zarr(
+                    zarr_store,  # type: ignore[arg-type]
+                    region={
+                        "band": slice(i, i + 1),
+                        "y": slice(y_start, y_end),
+                        "x": slice(x_start, x_end),
+                    },
+                    write_empty_chunks=False,
+                    safe_chunks=False,  # our grid size is not an exact multiple of chunk size
+                    consolidated=False,
+                    zarr_format=3,
+                )
+
+
+def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, int]]:
+    """
+    Split an interval into two sub-intervals in case it is larger than the given maximum size.
+    The split is done at the closest power of two.
+
+    Example:
+        _split_interval(0, 1000, 512) -> (0, 512), (512, 1000)
+        _split_interval(512, 1000, 512) -> (512, 1000)
+
+    Args:
+        start (_type_): _description_
+        end (_type_): _description_
+        max_size (_type_): _description_
+
+    Yields:
+        _type_: _description_
+    """
+    n = end - start
+    if n > max_size:
+        split_at = 2 ** math.floor(math.log2(n - 1)) + start
+        yield start, split_at
+        yield split_at, end
+    else:
+        yield start, end
+
+
 def main() -> None:
     assert load_dotenv()
     service_name = f"{os.environ['RUNNER_NAME']}-{os.getpid()}"
@@ -313,6 +407,7 @@ def main() -> None:
             GranulesToZarr,
             GranuleToZarr,
             GranuleProductToZarr,
+            ComputeMosaic,
         ],
         cache=cache,
     )
