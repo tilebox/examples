@@ -39,14 +39,13 @@ class S2Product:
     name: str
     native_resolution: int
     dtype: DTypeLike
-    scale_factor: float
 
 
 _S2_PRODUCTS = {
-    "B02": S2Product("blue band", 10, np.uint16, 1 / 10000),
-    "B03": S2Product("green band", 10, np.uint16, 1 / 10000),
-    "B04": S2Product("red band", 10, np.uint16, 1 / 10000),
-    "SCL": S2Product("scene classification", 20, np.uint8, 1),
+    "B02": S2Product("blue band", 10, np.uint16),
+    "B03": S2Product("green band", 10, np.uint16),
+    "B04": S2Product("red band", 10, np.uint16),
+    "SCL": S2Product("scene classification", 20, np.uint8),
 }
 """The S2 products we are reading for each granule"""
 
@@ -176,11 +175,7 @@ class InitializeZarrDatacube(Task):
                 dask.array.zeros((self.n_time, self.n_y, self.n_x), chunks=(1, 1024, 1024), dtype=product.dtype),
             )
             dataset.attrs["long_name"] = product.name
-            encodings[variable_name] = {
-                "_FillValue": 0,
-                "scale_factor": product.scale_factor,
-                "compressors": (compressor,),
-            }
+            encodings[variable_name] = {"compressors": (compressor,)}
 
         zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
         zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
@@ -276,10 +271,6 @@ class GranuleProductToZarr(Task):
             target_dataset = dataset.odc.reproject(how=target_grid, resampling=Resampling.nearest, dst_nodata=0)
             target_dataset = target_dataset.expand_dims(time=1)
             target_dataset = target_dataset.drop_vars("spatial_ref")  # don't write this to zarr, not needed
-
-            product = _S2_PRODUCTS[variable_name]
-            if product.scale_factor != 1:
-                target_dataset[variable_name] = target_dataset[variable_name] * np.float32(product.scale_factor)
 
             logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
 
