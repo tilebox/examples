@@ -4,8 +4,6 @@ import pickle
 from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
-from hashlib import md5
-from io import BytesIO
 from pathlib import Path
 
 import dask.array
@@ -270,19 +268,12 @@ class GranuleProductToZarr(Task):
         tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
         with tracer.start_span("read_product"):
             logger.info(f"Reading product {self.product_location}")
+            buffer = bytes(sentinel2_data_store().get(self.product_location).bytes())
+            logger.info(f"Product read, size={len(buffer)} bytes")
 
-            with BytesIO() as buffer:
-                object_hash = md5()  # noqa: S324
-                for chunk in sentinel2_data_store().get(self.product_location):
-                    buffer.write(chunk)
-                    object_hash.update(chunk)
-
-                data = buffer.getvalue()
-                logger.info(f"Product read, size={len(data)} bytes, md5={object_hash.hexdigest()}")
-
-                with rasterio.MemoryFile(data).open(driver="JP2OpenJPEG") as product:
-                    arr = product.read(1)
-                    src_grid = GeoBox(shape=arr.shape, affine=product.transform, crs=product.crs)
+            with rasterio.MemoryFile(buffer).open(driver="JP2OpenJPEG") as product:
+                arr = product.read(1)
+                src_grid = GeoBox(shape=arr.shape, affine=product.transform, crs=product.crs)
 
         with tracer.start_span("reproject"):
             dataset = xr.Dataset({variable_name: (["y", "x"], arr)})
@@ -327,6 +318,7 @@ class ComputeMosaic(Task):
         if len(chunks) > 1:
             for chunk in chunks:
                 context.submit_subtask(ComputeMosaic(*chunk))
+            return
 
         (y_start, y_end), (x_start, x_end) = chunks[0]
         context.current_task.display = f"ComputeMosaic(y={y_start}:{y_end}, x={x_start}:{x_end})"  # type: ignore[attr-defined]
@@ -346,7 +338,7 @@ class ComputeMosaic(Task):
                     cube[band][:, y_start:y_end, x_start:x_end].where(valid & has_data).quantile(0.25, dim="time")
                     / 10000
                 ).compute()
-                mosaic = xr.Dataset({"mosaic": mosaic_arr}).expand_dims({"band": 1})
+                mosaic = xr.Dataset({"mosaic": mosaic_arr}).drop_vars("quantile").expand_dims({"band": 1})
                 mosaic.to_zarr(
                     zarr_store,  # type: ignore[arg-type]
                     region={
@@ -369,14 +361,6 @@ def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, 
     Example:
         _split_interval(0, 1000, 512) -> (0, 512), (512, 1000)
         _split_interval(512, 1000, 512) -> (512, 1000)
-
-    Args:
-        start (_type_): _description_
-        end (_type_): _description_
-        max_size (_type_): _description_
-
-    Yields:
-        _type_: _description_
     """
     n = end - start
     if n > max_size:
