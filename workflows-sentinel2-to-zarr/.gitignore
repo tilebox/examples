@@ -1,3 +1,6 @@
+# Secrets
+.env
+
 # Python-generated files
 __pycache__/
 *.py[oc]
@@ -11,4 +14,3 @@ wheels/
 
 # Jupyter / Notebooks
 .ipynb_checkpoints/
-

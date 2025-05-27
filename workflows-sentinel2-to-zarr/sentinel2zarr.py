@@ -1,3 +1,4 @@
+import os
 import pickle
 from dataclasses import dataclass
 from functools import lru_cache
@@ -10,6 +11,7 @@ import numpy as np
 import rasterio
 import xarray as xr
 from boto3 import Session
+from dotenv import load_dotenv
 from google.cloud.storage import Client as StorageClient
 from numpy.typing import DTypeLike
 from obstore.auth.boto3 import Boto3CredentialProvider
@@ -24,7 +26,8 @@ from tilebox.datasets.data.time_interval import TimeInterval
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.cache import GoogleStorageCache
-from tilebox.workflows.observability.logging import get_logger
+from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
+from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
 from zarr.codecs import BloscCodec
 from zarr.storage import ObjectStore as ZarrObjectStore
 
@@ -61,8 +64,10 @@ def sentinel2_data_store() -> ObjectStore:
     """
     eodata_mounted = Path("/eodata")  # on CloudFerro, the copernicus bucket is mounted as /eodata
     if eodata_mounted.exists():
+        logger.info("Configured local mounted filesystem access to Sentinel-2 archive")
         return LocalStore(eodata_mounted)
 
+    logger.info("Configured remote S3 API access to Sentinel-2 archive")
     # to access the Copernicus S3 bucket directly, generate credentials via
     # https://eodata-s3keysmanager.dataspace.copernicus.eu/ and then add them as a `copernicus-dataspace` profile in
     # ~/.aws/credentials
@@ -290,6 +295,12 @@ class GranuleProductToZarr(Task):
 
 
 def main() -> None:
+    assert load_dotenv()
+    service_name = f"{os.environ['RUNNER_NAME']}-{os.getpid()}"
+    configure_console_logging()
+    configure_otel_logging_axiom(service_name)
+    configure_otel_tracing_axiom(service_name)
+
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
     cache = GoogleStorageCache(
