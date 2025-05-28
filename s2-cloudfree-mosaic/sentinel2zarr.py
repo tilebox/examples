@@ -390,7 +390,7 @@ def main() -> None:
             InitializeZarrDatacube,
             GranulesToZarr,
             GranuleToZarr,
-            GranuleProductToZarr,
+            # GranuleProductToZarr,
             ComputeMosaic,
         ],
         cache=cache,

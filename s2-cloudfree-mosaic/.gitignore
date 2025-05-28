@@ -14,3 +14,7 @@ wheels/
 
 # Jupyter / Notebooks
 .ipynb_checkpoints/
+
+# Images
+*.png
+*.tif
