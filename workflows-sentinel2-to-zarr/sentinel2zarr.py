@@ -191,7 +191,7 @@ class InitializeZarrDatacube(Task):
             dask.array.zeros(
                 (3, self.n_y, self.n_x),
                 chunks=(1, SPATIAL_CHUNK_SIZE, SPATIAL_CHUNK_SIZE),
-                dtype=np.float32,
+                dtype=np.uint16,
             ),
         )
         encodings["mosaic"] = {"_FillValue": 0, "scale_factor": 1 / 10000, "compressors": (compressor,)}
