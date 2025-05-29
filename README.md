@@ -24,6 +24,8 @@ List of examples:
 A simple example that demonstrates how to use the Tilebox SDKs to submit a job and run a worker.
 - [Workflows Cron Automation, Python](/workflows-cron-automation-py/)  
 A simple example that demonstrates how to use the Tilebox SDKs to create a Workflows Cron Automation, a workflow that runs on a schedule, and showcases how to filter timeseries Datasets based on spatial and temporal criteria.
+- [Multi-Language Workflows, Python and Go](/workflows-multilang/)
+An example that demonstrates how to use the Tilebox SDKs to create a Workflows that uses tasks implemented in different languages, Python and Go. Go is used to submit the job, while Python is used to execute it.
 
 **Mixed**
 
