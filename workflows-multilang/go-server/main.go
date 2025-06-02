@@ -6,22 +6,24 @@ import (
 	"io"
 	"log"
 	"net/http"
-	"time"
+	"strconv"
+	"strings"
 
 	"github.com/tilebox/tilebox-go/workflows/v1"
 )
 
-type TaskingWorkflow struct {
-	City            string    `json:"city"` // json tags must match the Python task definition
-	Time            time.Time `json:"time"`
-	ImageResolution string    `json:"image_resolution"`
+type ScheduleImageCapture struct {
+	// json tags must match the Python task definition
+	Location      [2]float64 `json:"location"` // lat_lon
+	ResolutionM   int        `json:"resolution_m"`
+	SpectralBands []float64  `json:"spectral_bands"` // spectral bands in nm
 }
 
 // No need to define the Execute method since we're only submitting the task
 
 // Identifier must match with the task identifier in the Python runner
-func (t *TaskingWorkflow) Identifier() workflows.TaskIdentifier {
-	return workflows.NewTaskIdentifier("tilebox.com/tasking_workflow", "v1.0")
+func (t *ScheduleImageCapture) Identifier() workflows.TaskIdentifier {
+	return workflows.NewTaskIdentifier("tilebox.com/schedule_image_capture", "v1.0")
 }
 
 // Start an HTTP server to submit jobs
@@ -43,27 +45,44 @@ func main() {
 // Submit a job based on some query parameters
 func submitHandler(client *workflows.Client, cluster *workflows.Cluster) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		city := r.URL.Query().Get("city")
-		timeArg := r.URL.Query().Get("time")
-		resolution := r.URL.Query().Get("resolution")
+		latArg := r.URL.Query().Get("lat")
+		lonArg := r.URL.Query().Get("lon")
+		resolutionArg := r.URL.Query().Get("resolution")
+		bandsArg := r.URL.Query().Get("bands[]")
 
-		if city == "" {
-			http.Error(w, "city is required", http.StatusBadRequest)
+		latFloat, err := strconv.ParseFloat(latArg, 64)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
-
-		taskingTime, err := time.Parse(time.RFC3339, timeArg)
+		lonFloat, err := strconv.ParseFloat(lonArg, 64)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
 		}
 
-		job, err := client.Jobs.Submit(r.Context(), fmt.Sprintf("tasking/%s", city), cluster,
+		resolutionM, err := strconv.Atoi(resolutionArg)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		var spectralBands []float64
+		for _, bandArg := range strings.Split(bandsArg, ",") {
+			band, err := strconv.ParseFloat(bandArg, 64)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadRequest)
+				return
+			}
+			spectralBands = append(spectralBands, band)
+		}
+
+		job, err := client.Jobs.Submit(r.Context(), "Schedule Image capture", cluster,
 			[]workflows.Task{
-				&TaskingWorkflow{
-					City:            city,
-					Time:            taskingTime,
-					ImageResolution: resolution,
+				&ScheduleImageCapture{
+					Location:      [2]float64{latFloat, lonFloat},
+					ResolutionM:   resolutionM,
+					SpectralBands: spectralBands,
 				},
 			},
 		)

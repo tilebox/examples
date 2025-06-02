@@ -36,7 +36,7 @@ go run .
 Submit a job by calling the server's `/submit` endpoint:
 
 ```bash
-curl http://localhost:8080/submit?city=Zurich&time=2025-05-29T08:06:42Z&resolution=30m
+curl http://localhost:8080/submit?lat=40.75&lon=-73.98&resolution=30&bands[]=489.0,560.6,666.5
 ```
 
 The runner should execute the task and print the parameters to stdout.
