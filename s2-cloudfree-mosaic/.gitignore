@@ -18,3 +18,4 @@ wheels/
 # Images
 *.png
 *.tif
+!ireland.png

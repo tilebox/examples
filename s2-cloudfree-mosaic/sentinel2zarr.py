@@ -12,7 +12,6 @@ import rasterio
 import xarray as xr
 from boto3 import Session
 from dotenv import load_dotenv
-from google.cloud.storage import Client as StorageClient
 from numpy.typing import DTypeLike
 from obstore.auth.boto3 import Boto3CredentialProvider
 from obstore.store import LocalStore, ObjectStore, S3Store
@@ -25,7 +24,7 @@ from tilebox.datasets import Client as DatasetClient
 from tilebox.datasets.data.time_interval import TimeInterval
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
-from tilebox.workflows.cache import GoogleStorageCache
+from tilebox.workflows.cache import AmazonS3Cache
 from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
 from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
 from zarr.codecs import BloscCodec
@@ -49,8 +48,8 @@ _S2_PRODUCTS = {
 }
 """The S2 products we are reading for each granule"""
 
-CACHE_GCS_BUCKET = "workflow-cache-15c9850"
 ZARR_S3_BUCKET = "workflow-cache-35ee674"
+ZARR_S3_BUCKET_REGION = "eu-central-1"
 CACHE_PREFIX = "s2-zarr"
 SPATIAL_CHUNK_SIZE = 2048
 
@@ -84,7 +83,7 @@ def zarr_storage(prefix: str) -> ObjectStore:
     """An object store for writing the output Zarr datacube to"""
     return S3Store(
         bucket=ZARR_S3_BUCKET,
-        region="eu-central-1",
+        region=ZARR_S3_BUCKET_REGION,
         prefix=prefix,
         credential_provider=Boto3CredentialProvider(Session(profile_name="default")),
     )
@@ -372,17 +371,18 @@ def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, 
 
 
 def main() -> None:
-    assert load_dotenv()
+    if Path(".env").exists():
+        assert load_dotenv()
+
     service_name = f"{os.environ['RUNNER_NAME']}-{os.getpid()}"
     configure_console_logging()
-    configure_otel_logging_axiom(service_name)
-    configure_otel_tracing_axiom(service_name)
+    if os.environ.get("AXIOM_API_KEY"):
+        configure_otel_logging_axiom(service_name)
+        configure_otel_tracing_axiom(service_name)
 
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
-    cache = GoogleStorageCache(
-        StorageClient(project="tilebox-production").bucket(CACHE_GCS_BUCKET), prefix=CACHE_PREFIX
-    )
+    cache = AmazonS3Cache(ZARR_S3_BUCKET, prefix=CACHE_PREFIX)
     runner = client.runner(
         "workflows-demo-7GzWwLrcvfJ8xZ",
         tasks=[
@@ -390,7 +390,7 @@ def main() -> None:
             InitializeZarrDatacube,
             GranulesToZarr,
             GranuleToZarr,
-            # GranuleProductToZarr,
+            GranuleProductToZarr,
             ComputeMosaic,
         ],
         cache=cache,
