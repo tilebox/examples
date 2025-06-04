@@ -31,3 +31,5 @@ An example that demonstrates how to use the Tilebox SDKs to create a Workflows t
 
 - [Download S2 Data for Points of Interest, Python](/workflows-download-s2-for-aois/)  
 A more complex example that demonstrates how to use the Tilebox SDKs to create a Workflows to find Sentinel-2 data for a set of points of interest (POIs), filter the data to be as cloud-free as possible and finally download the data.
+- [Sentinel-2 Cloud-free Mosaic](/s2-cloudfree-mosaic/)
+This workflow reads Sentinel-2 data from the Copernicus archive, and writes a cloudfree mosaic to a Zarr datacube.

@@ -16,9 +16,8 @@ Specifically, it loads Sentinel-2 metadata,
 ## Prerequisites
 
 - Python 3.10+
-- Environment variables – provide your API key and cluster slug as environment variables via .env file, as well as Copernicus Dataspace credentials
+- Environment variables – provide your API key as environment variables via .env file, as well as Copernicus Dataspace credentials
     - Tilebox API Key – [create here](https://console.tilebox.com/account/api-keys)
-    - Tilebox Cluster slug – [create here](https://console.tilebox.com/workflows/clusters)
     - Copernicus Dataspace credentials – [see links here](https://docs.tilebox.com/storage/clients#copernicus-data-space)
 - Install the `uv` Python package manager – [installation instructions](https://docs.astral.sh/uv/)
 

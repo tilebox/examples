@@ -73,7 +73,6 @@ client.jobs().submit(
         crs="EPSG:2157",
         resolution=10
     ),
-    cluster="workflows-demo-7GzWwLrcvfJ8xZ"
 )
 ```
 

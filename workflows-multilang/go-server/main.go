@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"io"
 	"log"
@@ -28,22 +27,15 @@ func (t *ScheduleImageCapture) Identifier() workflows.TaskIdentifier {
 
 // Start an HTTP server to submit jobs
 func main() {
-	ctx := context.Background()
-	client := workflows.NewClient()
-
-	cluster, err := client.Clusters.Get(ctx, "test-cluster-tZD9Ca2qsqt4V")
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	http.HandleFunc("/submit", submitHandler(client, cluster))
-
 	log.Println("Server starting on http://localhost:8080")
+
+	client := workflows.NewClient()
+	http.HandleFunc("/submit", submitHandler(client))
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
 
 // Submit a job based on some query parameters
-func submitHandler(client *workflows.Client, cluster *workflows.Cluster) http.HandlerFunc {
+func submitHandler(client *workflows.Client) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		latArg := r.URL.Query().Get("lat")
 		lonArg := r.URL.Query().Get("lon")
@@ -77,7 +69,7 @@ func submitHandler(client *workflows.Client, cluster *workflows.Cluster) http.Ha
 			spectralBands = append(spectralBands, band)
 		}
 
-		job, err := client.Jobs.Submit(r.Context(), "Schedule Image capture", cluster,
+		job, err := client.Jobs.Submit(r.Context(), "Schedule Image capture",
 			[]workflows.Task{
 				&ScheduleImageCapture{
 					Location:      [2]float64{latFloat, lonFloat},
