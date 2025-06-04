@@ -2,7 +2,7 @@ module github.com/tilebox/examples/multilang
 
 go 1.24.0
 
-require github.com/tilebox/tilebox-go v0.0.0-20250529080642-d4b5369b1c1b
+require github.com/tilebox/tilebox-go v0.0.0-20250603134905-a7747e140d3b
 
 require (
 	connectrpc.com/connect v1.18.1 // indirect

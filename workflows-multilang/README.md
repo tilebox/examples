@@ -9,7 +9,6 @@ This example demonstrates how to use the [Tilebox](https://tilebox.com) SDKs to 
 - Install the `uv` Python package manager – [installation instructions](https://docs.astral.sh/uv/)
 - Environment variables – provide your API key as environment variables
     - Tilebox API Key (`TILEBOX_API_KEY`) – [create here](https://console.tilebox.com/account/api-keys)
-- Create a cluster in the [Tilebox Console](https://console.tilebox.com/workflows/clusters) and update the cluster in `go-server/main.go` and `python-runner/runner.py`
 
 ## Getting Started
 

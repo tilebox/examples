@@ -384,7 +384,6 @@ def main() -> None:
 
     cache = AmazonS3Cache(ZARR_S3_BUCKET, prefix=CACHE_PREFIX)
     runner = client.runner(
-        "workflows-demo-7GzWwLrcvfJ8xZ",
         tasks=[
             Sentinel2ToZarr,
             InitializeZarrDatacube,

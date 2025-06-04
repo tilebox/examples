@@ -161,10 +161,6 @@ def automation_exists(name: str, automations: List[AutomationPrototype]) -> bool
 
 
 def main():
-    cluster = os.getenv("TILEBOX_CLUSTER")
-    if cluster is None:
-        raise ValueError("TILEBOX_CLUSTER environment variable is not set")
-
     # Create the automation if it doesn't exist, this can be done on
     automations = wfClient.automations()
     if not automation_exists("s2-stats-automation", automations.all()):
@@ -174,7 +170,6 @@ def main():
                 duration_hours=24
             ),  # the task (and its input parameters) to run repeatedly
             ["* * * * *"],  # The cron schedule
-            cluster,  # cluster slug to submit jobs to
             max_retries=3,
         )
         logger.info(f"Created cron automation {cron_automation.name}")
@@ -183,7 +178,7 @@ def main():
 
     # Start the workflow runner and wait for incoming tasks
     logger.info("Starting workflow runner")
-    wfClient.runner(cluster, [S2Stats]).run_forever()
+    wfClient.runner(tasks=[S2Stats]).run_forever()
 
 
 if __name__ == "__main__":

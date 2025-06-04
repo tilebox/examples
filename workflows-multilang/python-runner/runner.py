@@ -19,12 +19,7 @@ class ScheduleImageCapture(Task):
 
 def main():
     client = Client()
-    runner = client.runner(
-        "test-cluster-tZD9Ca2qsqt4V",
-        tasks=[
-            ScheduleImageCapture,
-        ],
-    )
+    runner = client.runner(tasks=[ScheduleImageCapture])
     runner.run_forever()
 
 

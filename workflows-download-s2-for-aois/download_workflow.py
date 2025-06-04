@@ -173,7 +173,7 @@ class ListDownloads(Task):
             logger.info(f"  Thumbnail: {metadata.isel(time=i).thumbnail.values}")
 
 
-def setup_environment() -> str:
+def setup_environment() -> None:
     # setup environment
     dotenv.load_dotenv()
 
@@ -183,19 +183,14 @@ def setup_environment() -> str:
         raise ValueError("COPERNICUS_SECRET_ACCESS_KEY environment variable is not set")
     if os.getenv("TILEBOX_API_KEY") is None:
         raise ValueError("TILEBOX_API_KEY environment variable is not set")
-    cluster = os.getenv("TILEBOX_CLUSTER")
-    if cluster is None:
-        raise ValueError("TILEBOX_CLUSTER environment variable is not set")
-    return cluster
 
 
 if __name__ == "__main__":
-    cluster = setup_environment()
+    setup_environment()
     wfClient = WFClient()
 
     # Start a workflow runner right here
     runner = wfClient.runner(
-        cluster,
         tasks=[
             DownloadWorkflow,
             LoadMetadata,
