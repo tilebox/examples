@@ -5,8 +5,10 @@ description = "Tilebox example workflow for converting Sentinel-2 data to Zarr f
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
+    "cyclopts>=3.18.0",
     "dask>=2025.5.1",
     "dotenv>=0.9.9",
+    "morecantile>=6.2.0",
     "numpy>=2.2.6",
     "obstore>=0.6.0",
     "odc-geo>=0.4.10",

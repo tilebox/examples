@@ -5,12 +5,14 @@ from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import dask.array
 import numpy as np
 import rasterio
 import xarray as xr
 from boto3 import Session
+from cyclopts import App
 from dotenv import load_dotenv
 from numpy.typing import DTypeLike
 from obstore.auth.boto3 import Boto3CredentialProvider
@@ -370,7 +372,11 @@ def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, 
         yield start, end
 
 
-def main() -> None:
+app = App()
+
+
+@app.default
+def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: str | None = None) -> None:
     if Path(".env").exists():
         assert load_dotenv()
 
@@ -383,19 +389,39 @@ def main() -> None:
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
     cache = AmazonS3Cache(ZARR_S3_BUCKET, prefix=CACHE_PREFIX)
-    runner = client.runner(
-        tasks=[
+
+    selected_tasks = [
+        Sentinel2ToZarr,
+        InitializeZarrDatacube,
+        GranulesToZarr,
+        GranuleToZarr,
+        GranuleProductToZarr,
+        ComputeMosaic,
+    ]
+    if tasks == "compute-only":
+        selected_tasks = [
             Sentinel2ToZarr,
             InitializeZarrDatacube,
             GranulesToZarr,
+            ComputeMosaic,
+        ]
+    elif tasks == "data-only":
+        selected_tasks = [
             GranuleToZarr,
             GranuleProductToZarr,
-            ComputeMosaic,
-        ],
+        ]
+    elif tasks != "all":
+        raise ValueError(f"Unknown tasks selection: {tasks}")
+
+    logger.info(f"Starting runner with {tasks} tasks on {cluster or 'default'} cluster")
+
+    runner = client.runner(
+        cluster,
+        tasks=selected_tasks,
         cache=cache,
     )
     runner.run_forever()
 
 
 if __name__ == "__main__":
-    main()
+    app()
