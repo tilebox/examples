@@ -125,8 +125,8 @@ class RegionOfInterest:
 
 
 class Sentinel2ToZarr(Task):
-    collection: str
-    """The name of the S2 collection to query and convert"""
+    collections: list[str]
+    """The name of the S2 collections to query and convert"""
 
     roi: RegionOfInterest
     """The region of interest to query"""
@@ -138,8 +138,18 @@ class Sentinel2ToZarr(Task):
     """The target resolution for our output grid, in units of the target CRS"""
 
     def execute(self, context: ExecutionContext) -> None:
-        collection = DatasetClient().dataset("open_data.copernicus.sentinel2_msi").collection(self.collection)
-        granules = collection.query(temporal_extent=self.roi.time, spatial_extent=self.roi.area.shape)
+        dataset = DatasetClient().dataset("open_data.copernicus.sentinel2_msi")
+        collection_granules = [
+            dataset.collection(collection).query(temporal_extent=self.roi.time, spatial_extent=self.roi.area.shape)
+            for collection in self.collections
+        ]
+
+        collection_granules = [cg for cg in collection_granules if cg]  # remove empty datasets
+        if len(collection_granules) == 0:
+            logger.info("No granules found, skipping remaining workflow")
+            return
+
+        granules = xr.concat(collection_granules, dim="time").sortby("time")
         locations = [str(location).removeprefix("/eodata/") for location in granules.location.values]
 
         if len(locations) == 0:
