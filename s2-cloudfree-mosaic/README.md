@@ -60,17 +60,17 @@ The runners will idle until you submit a job. To submit a job, use the `Workflow
 from tilebox_workflows import Client
 from sentinel2zarr import Sentinel2ToZarr, RegionOfInterest, AreaOfInterest
 
-aoi = AreaOfInterest(-10.68234795, 51.36473433, -5.34679566, 55.44704815)  # ireland
-time_interval = ("2025-03-01", "2025-06-01")  # Spring 2025 season
+aoi = AreaOfInterest(16.15, 48.05, 16.65, 48.37)  # Vienna, Austria
+time_interval = ("2025-05-05", "2025-05-12")  # First week of May 2025
 
 
 client = Client()
 client.jobs().submit(
-    "s2-ireland-mosaic-spring-2025",
+    "s2-vienna-weekly-mosaic",
     Sentinel2ToZarr(
-        collection="S2A_S2MSI2A",
+        collections=["S2A_S2MSI2A", "S2C_S2MSI2A", "S2C_S2MSI2A"],
         roi=RegionOfInterest(aoi, time_interval),
-        crs="EPSG:2157",
+        crs="EPSG:3857",
         resolution=10
     ),
 )
