@@ -26,7 +26,7 @@ from tilebox.datasets import Client as DatasetClient
 from tilebox.datasets.data.time_interval import TimeInterval
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
-from tilebox.workflows.cache import AmazonS3Cache
+from tilebox.workflows.cache import GoogleStorageCache
 from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
 from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
 from zarr.codecs import BloscCodec
@@ -82,7 +82,10 @@ def sentinel2_data_store() -> ObjectStore:
 @lru_cache
 def zarr_storage(prefix: str) -> ObjectStore:
     """An object store for writing the output Zarr datacube to"""
-    return GCSStore(bucket=ZARR_GCS_BUCKET, prefix=prefix)
+    for a in GCSStore(bucket="workflow-cache-15c9850", prefix="debug/example2/").list():
+        for o in a:
+            print(o["path"])
+    return GCSStore(bucket="workflow-cache-15c9850", prefix=prefix)
 
 
 @dataclass
@@ -392,7 +395,7 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
 
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
-    cache = AmazonS3Cache(ZARR_GCS_BUCKET, prefix=CACHE_PREFIX)
+    cache = GoogleStorageCache(ZARR_GCS_BUCKET, prefix=CACHE_PREFIX)
 
     selected_tasks = [
         Sentinel2ToZarr,
