@@ -14,6 +14,7 @@ import xarray as xr
 from boto3 import Session
 from cyclopts import App
 from dotenv import load_dotenv
+from google.cloud.storage import Client as StorageClient
 from numpy.typing import DTypeLike
 from obstore.auth.boto3 import Boto3CredentialProvider
 from obstore.store import GCSStore, LocalStore, ObjectStore, S3Store
@@ -82,9 +83,6 @@ def sentinel2_data_store() -> ObjectStore:
 @lru_cache
 def zarr_storage(prefix: str) -> ObjectStore:
     """An object store for writing the output Zarr datacube to"""
-    for a in GCSStore(bucket="workflow-cache-15c9850", prefix="debug/example2/").list():
-        for o in a:
-            print(o["path"])
     return GCSStore(bucket="workflow-cache-15c9850", prefix=prefix)
 
 
@@ -395,7 +393,7 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
 
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
-    cache = GoogleStorageCache(ZARR_GCS_BUCKET, prefix=CACHE_PREFIX)
+    cache = GoogleStorageCache(StorageClient().bucket(ZARR_GCS_BUCKET), prefix=CACHE_PREFIX)
 
     selected_tasks = [
         Sentinel2ToZarr,
