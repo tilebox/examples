@@ -17,6 +17,7 @@ from dotenv import load_dotenv
 from google.cloud.storage import Client as StorageClient
 from numpy.typing import DTypeLike
 from obstore.auth.boto3 import Boto3CredentialProvider
+from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore, LocalStore, ObjectStore, S3Store
 from odc.geo.geobox import GeoBox
 from odc.geo.xr import wrap_xr
@@ -52,6 +53,7 @@ _S2_PRODUCTS = {
 """The S2 products we are reading for each granule"""
 
 ZARR_GCS_BUCKET = "workflow-cache-15c9850"
+ZARR_GCS_PROJECT = "tilebox-production"
 CACHE_PREFIX = "s2-zarr"
 SPATIAL_CHUNK_SIZE = 2048
 
@@ -83,7 +85,7 @@ def sentinel2_data_store() -> ObjectStore:
 @lru_cache
 def zarr_storage(prefix: str) -> ObjectStore:
     """An object store for writing the output Zarr datacube to"""
-    return GCSStore(bucket="workflow-cache-15c9850", prefix=prefix)
+    return GCSStore(bucket="workflow-cache-15c9850", prefix=prefix, credential_provider=GoogleCredentialProvider())
 
 
 @dataclass
@@ -393,7 +395,7 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
 
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
-    cache = GoogleStorageCache(StorageClient().bucket(ZARR_GCS_BUCKET), prefix=CACHE_PREFIX)
+    cache = GoogleStorageCache(StorageClient(project=ZARR_GCS_PROJECT).bucket(ZARR_GCS_BUCKET), prefix=CACHE_PREFIX)
 
     selected_tasks = [
         Sentinel2ToZarr,
