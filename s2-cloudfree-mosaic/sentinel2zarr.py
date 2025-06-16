@@ -16,7 +16,7 @@ from cyclopts import App
 from dotenv import load_dotenv
 from numpy.typing import DTypeLike
 from obstore.auth.boto3 import Boto3CredentialProvider
-from obstore.store import LocalStore, ObjectStore, S3Store
+from obstore.store import GCSStore, LocalStore, ObjectStore, S3Store
 from odc.geo.geobox import GeoBox
 from odc.geo.xr import wrap_xr
 from pyproj import Transformer
@@ -50,8 +50,7 @@ _S2_PRODUCTS = {
 }
 """The S2 products we are reading for each granule"""
 
-ZARR_S3_BUCKET = "workflow-cache-35ee674"
-ZARR_S3_BUCKET_REGION = "eu-central-1"
+ZARR_GCS_BUCKET = "workflow-cache-15c9850"
 CACHE_PREFIX = "s2-zarr"
 SPATIAL_CHUNK_SIZE = 2048
 
@@ -83,12 +82,7 @@ def sentinel2_data_store() -> ObjectStore:
 @lru_cache
 def zarr_storage(prefix: str) -> ObjectStore:
     """An object store for writing the output Zarr datacube to"""
-    return S3Store(
-        bucket=ZARR_S3_BUCKET,
-        region=ZARR_S3_BUCKET_REGION,
-        prefix=prefix,
-        credential_provider=Boto3CredentialProvider(Session(profile_name="default")),
-    )
+    return GCSStore(bucket=ZARR_GCS_BUCKET, prefix=prefix)
 
 
 @dataclass
@@ -293,7 +287,7 @@ class GranuleProductToZarr(Task):
             target_grid: GeoBox = pickle.loads(context.job_cache["target_grid"])  # type: ignore[attr-defined]  # noqa: S301
             target_dataset = dataset.odc.reproject(how=target_grid, resampling=Resampling.nearest, dst_nodata=0)
             target_dataset = target_dataset.expand_dims(time=1)
-            target_dataset = target_dataset.drop_vars("spatial_ref")  # don't write this to zarr, not needed
+            target_dataset = target_dataset.drop_vars(("spatial_ref", "y", "x"))  # don't write this to zarr, not needed
 
             logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
 
@@ -398,7 +392,7 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
 
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
-    cache = AmazonS3Cache(ZARR_S3_BUCKET, prefix=CACHE_PREFIX)
+    cache = AmazonS3Cache(ZARR_GCS_BUCKET, prefix=CACHE_PREFIX)
 
     selected_tasks = [
         Sentinel2ToZarr,
