@@ -289,7 +289,9 @@ class GranuleProductToZarr(Task):
 
             target_grid: GeoBox = pickle.loads(context.job_cache["target_grid"])  # type: ignore[attr-defined]  # noqa: S301
             target_dataset = dataset.odc.reproject(how=target_grid, resampling=Resampling.nearest, dst_nodata=0)
-            target_dataset = target_dataset.expand_dims(time=1)
+            target_dataset = xr.Dataset(
+                {variable_name: (("time", "y", "x"), target_dataset[variable_name].expand_dims("time").to_numpy())}
+            )
             target_dataset = target_dataset.drop_vars(("spatial_ref", "y", "x"))  # don't write this to zarr, not needed
 
             logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
