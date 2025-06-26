@@ -67,6 +67,9 @@ def combine_local_statistics(  # noqa: PLR0913
         (np.ndarray of shape (n_bands,))
     """
     n = n_1 + n_2
+    if n == 0:  # both stats are still empty, so nothing to combine
+        return 0, np.zeros_like(deviations_matrix_1), np.zeros_like(mean_vector_1)
+
     sigma = mean_vector_2 - mean_vector_1
     combined_mean_vector = mean_vector_1 + sigma * (n_2 / n)
     combined_deviations_matrix = deviations_matrix_1 + deviations_matrix_2 + (n_1 * n_2 / n) * np.outer(sigma, sigma)

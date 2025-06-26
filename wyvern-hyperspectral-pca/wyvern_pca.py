@@ -1,12 +1,12 @@
 import math
 import os
 import pickle
+import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
-import fsspec
 import numpy as np
 import rasterio
 from cyclopts import App
@@ -18,6 +18,7 @@ from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.cache import GoogleStorageCache, LocalFileSystemCache
 from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
 from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
+from vsifile.rasterio import VSIOpener
 
 from distributed_pca import (
     combine_local_statistics,
@@ -88,7 +89,7 @@ class SpatialChunk:
 
 
 @contextmanager
-def open_wyvern_product(product_path: str, mode: str = "r") -> Iterator[rasterio.DatasetReader]:
+def open_wyvern_product(product_path: str) -> Iterator[rasterio.DatasetReader]:
     """Open a wyvern product either from the public S3 bucket or from a local file if it is already downloaded.
 
     Intended to be used as a context manager with the `with` statement.
@@ -99,13 +100,86 @@ def open_wyvern_product(product_path: str, mode: str = "r") -> Iterator[rasterio
     Yields:
         Iterator[rasterio.DatasetReader]: A rasterio dataset reader for the product.
     """
-    if product_path.startswith("s3://"):  # open directly from S3
-        fs = fsspec.filesystem("s3", anon=True)
-        with rasterio.open(product_path.removeprefix("s3://"), mode=mode, opener=fs) as file:
-            yield file
-    else:  # open local file
-        with rasterio.open(product_path, mode=mode) as file:
-            yield file
+    with rasterio.Env(
+        GDAL_DISABLE_READDIR_ON_OPEN="EMPTY_DIR",  # skip reading auxiliary sidecar files such as .aux.xml, .tab, .tfw
+        GDAL_INGESTED_BYTES_AT_OPEN=128 * 1024,  # initial 128KB header request
+        GDAL_HTTP_MERGE_CONSECUTIVE_RANGES="YES",
+        GDAL_HTTP_MULTIRANGE="YES",
+        GDAL_HTTP_VERSION="2",
+    ):
+        if product_path.startswith("s3://"):  # open directly from S3
+            opener = VSIOpener(config={"skip_signature": True, "region": "ca-central-1"})
+            with rasterio.open(product_path, mode="r", opener=opener) as file:
+                yield file
+        else:  # open local file
+            with rasterio.open(product_path, mode="r") as file:
+                yield file
+
+
+class WyvernPCA(Task):
+    """
+    WyvernPCA is the entrypoint task for performing PCA on a set of wyvern products.
+    """
+
+    product_paths: list[str]
+
+    def execute(self, context: ExecutionContext) -> None:
+        products = sorted(set(self.product_paths))  # deduplicate and sort
+        context.job_cache["products"] = "\n".join(products).encode()
+
+        all_products_stats = context.submit_subtask(
+            ComputePrincipalComponentsForProductRange(0, len(self.product_paths))
+        )
+        context.submit_subtask(
+            ComputePrincipalComponentsFromStats(
+                f"product_stats_0_{len(self.product_paths)}",
+                output_key="eigenvectors",
+            ),
+            depends_on=[all_products_stats],
+        )
+
+
+class ComputePrincipalComponentsForProductRange(Task):
+    """
+    ComputePrincipalComponentsForProductRange computes the principal components for a given range of products.
+    """
+
+    start_index: int
+    end_index: int
+
+    def execute(self, context: ExecutionContext) -> None:
+        n = self.end_index - self.start_index
+        context.current_task.display = f"ComputePC ({n} products)"
+
+        if n >= 4:
+            mid = self.start_index + n // 2
+            tasks = context.submit_subtasks(
+                [
+                    ComputePrincipalComponentsForProductRange(self.start_index, mid),
+                    ComputePrincipalComponentsForProductRange(mid, self.end_index),
+                ]
+            )
+            context.submit_subtask(
+                CombineStats(
+                    output_stats_key=f"product_stats_{self.start_index}_{self.end_index}",
+                    input_stats_key=[
+                        f"product_stats_{self.start_index}_{mid}",
+                        f"product_stats_{mid}_{self.end_index}",
+                    ],
+                ),
+                depends_on=tasks,
+            )
+            return
+
+        products = context.job_cache["products"].decode().splitlines()[self.start_index : self.end_index]
+        product_tasks = context.submit_subtasks([ComputePrincipalComponentsForProduct(product) for product in products])
+        context.submit_subtask(
+            CombineStats(
+                output_stats_key=f"product_stats_{self.start_index}_{self.end_index}",
+                input_stats_key=[f"{Path(product).stem}/product_stats" for product in products],
+            ),
+            depends_on=product_tasks,
+        )
 
 
 class ComputePrincipalComponentsForProduct(Task):
@@ -115,7 +189,7 @@ class ComputePrincipalComponentsForProduct(Task):
     It subdivides the product into chunks, computes local statistics for each chunk, and then combines the
     local statistics recursively until eventually global statistics for the entire product are computed.
 
-    From those global statistics, the principal components are computed.
+    From those global statistics, the principal components for the product are computed.
     """
 
     product_path: str
@@ -125,11 +199,14 @@ class ComputePrincipalComponentsForProduct(Task):
         with open_wyvern_product(self.product_path) as file:
             height, width = file.shape
 
-        full_product_chunk = SpatialChunk(0, height, 0, width)
-
-        stats_task = context.submit_subtask(ComputeLocalStatsForChunk(self.product_path, full_product_chunk))
+        stats_task = context.submit_subtask(
+            ComputeLocalStatsForChunk(self.product_path, SpatialChunk(0, height, 0, width), output_key="product_stats")
+        )
         context.submit_subtask(
-            ComputePrincipalComponents(self.product_path, full_product_chunk, output_key="eigenvectors"),
+            ComputePrincipalComponentsFromStats(
+                f"{Path(self.product_path).stem}/product_stats",
+                output_key=f"{Path(self.product_path).stem}/eigenvectors",
+            ),
             depends_on=[stats_task],
         )
 
@@ -147,8 +224,13 @@ class ComputeLocalStatsForChunk(Task):
 
     product_path: str
     chunk: SpatialChunk
+    output_key: str | None = None
+    "A unique key for storing the output stats in the job cache. If not provided, the key is derived from the chunk."
 
     def execute(self, context: ExecutionContext) -> None:
+        product_name = Path(self.product_path).stem
+        output_key = self.output_key or self.chunk.key
+
         context.current_task.display = f"LocalStats[{self.chunk}]"
         sub_chunks = self.chunk.immediate_sub_chunks()
 
@@ -159,7 +241,10 @@ class ComputeLocalStatsForChunk(Task):
             )
             # after all sub-chunks are done, we need to aggregate the results
             context.submit_subtask(
-                CombineChunkStats(self.product_path, output_chunk=self.chunk, input_chunks=sub_chunks),
+                CombineStats(
+                    output_stats_key=f"{product_name}/{output_key}",
+                    input_stats_key=[f"{product_name}/{chunk.key}" for chunk in sub_chunks],
+                ),
                 depends_on=compute_local_stats,
             )
             return
@@ -167,11 +252,16 @@ class ComputeLocalStatsForChunk(Task):
         assert len(sub_chunks) == 1, "We should have a single chunk left by now"
         assert sub_chunks[0] == self.chunk, "The single chunk should be the same as the original chunk"
 
+        before = time.perf_counter()
         # we only have a single chunk to process, so let's load it and then do PCA
         window = self.chunk.to_rasterio_window()
         with open_wyvern_product(self.product_path) as file:
             arr = file.read(window=window).transpose((1, 2, 0))
             nodata = file.nodata
+
+        duration = time.perf_counter() - before
+
+        logger.info(f"Read chunk {self.chunk} from {Path(self.product_path).name} in {duration:.2f}s")
 
         # convert the 3D array of shape (y, x, bands) to a feature array of shape (N, bands)
         all_measurements = arr.reshape(arr.shape[0] * arr.shape[1], arr.shape[2])
@@ -189,58 +279,49 @@ class ComputeLocalStatsForChunk(Task):
             deviations_matrix = np.zeros(shape=(n_bands, n_bands), dtype=float)
             mean_vector = np.zeros(shape=(n_bands,), dtype=float)
 
-        product_cache = context.job_cache.group(Path(self.product_path).stem)
-        logger.info(f"Product {self.product_path}: Writing stats for {self.chunk}")
-        product_cache[self.chunk.key] = pickle.dumps((n_samples, deviations_matrix, mean_vector))
+        context.job_cache[f"{product_name}/{output_key}"] = pickle.dumps((n_samples, deviations_matrix, mean_vector))
 
 
-class CombineChunkStats(Task):
+class CombineStats(Task):
     """
-    CombineChunkStats combines the local statistics from multiple chunks into a single set of statistics.
+    CombineStats combines local statistics from multiple chunks or products into a single set of statistics.
     """
 
-    product_path: str
-    output_chunk: SpatialChunk
-    input_chunks: list[SpatialChunk]
+    output_stats_key: str
+    input_stats_key: list[str]
 
     def execute(self, context: ExecutionContext) -> None:
-        input_chunks_repr = ", ".join([f"[{chunk}]" for chunk in self.input_chunks])
-        context.current_task.display = f"CombineStats[{self.output_chunk}]\n{input_chunks_repr}"
-        product_cache = context.job_cache.group(Path(self.product_path).stem)
-        if len(self.input_chunks) == 0:
+        if len(self.input_stats_key) == 0:
             return  # no input chunks, so nothing to do
 
         # three-tuple of (n_samples, deviations_matrix, mean_vector)
-        stats = pickle.loads(product_cache[self.input_chunks[0].key])
+        stats = pickle.loads(context.job_cache[self.input_stats_key[0]])
 
         # aggregate the local statistics for each chunk
-        for chunk in self.input_chunks[1:]:
-            chunk_stats = pickle.loads(product_cache[chunk.key])
+        for stats_key in self.input_stats_key[1:]:
+            chunk_stats = pickle.loads(context.job_cache[stats_key])
             stats = combine_local_statistics(*stats, *chunk_stats)
 
-        logger.info(f"Product {self.product_path}: Writing stats for {self.output_chunk}")
-        product_cache[self.output_chunk.key] = pickle.dumps(stats)
+        context.current_task.display = f"CombineStats n_pixels={stats[0]}"
+        context.job_cache[self.output_stats_key] = pickle.dumps(stats)
 
 
-class ComputePrincipalComponents(Task):
+class ComputePrincipalComponentsFromStats(Task):
     """
-    ComputePrincipalComponents computes the principal components for a given chunk from the chunk statistics that
-    are already required to be computed and cached beforehand.
+    ComputePrincipalComponents computes the principal components from pre-computed and potentially combined statistics.
     """
 
-    product_path: str
-    chunk: SpatialChunk
+    stats_key: str
     output_key: str
 
     def execute(self, context: ExecutionContext) -> None:
-        context.current_task.display = f"ComputePC[{self.chunk}]"
-        product_cache = context.job_cache.group(Path(self.product_path).stem)
-        n, deviations_matrix, _ = pickle.loads(product_cache[self.chunk.key])
+        context.current_task.display = "ComputePC"
+        n, deviations_matrix, _ = pickle.loads(context.job_cache[self.stats_key])
 
         # compute the covariance matrix
         covariance_matrix = deviations_matrix / (n - 1)
         eigenvalues, eigenvectors = compute_eigenvectors(covariance_matrix)
-        product_cache[self.output_key] = pickle.dumps((eigenvalues, eigenvectors))
+        context.job_cache[self.output_key] = pickle.dumps((eigenvalues, eigenvectors))
 
 
 def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, int]]:
@@ -264,6 +345,22 @@ def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, 
 app = App()
 
 
+def get_cache(cache_bucket: str | None = None) -> GoogleStorageCache | LocalFileSystemCache:
+    if cache_bucket is None:
+        return LocalFileSystemCache()
+
+    if not cache_bucket.startswith("gs://"):
+        raise ValueError("Expected a google storage bucket URL, but got {cache_bucket}")
+
+    logger.info(f"Using a google storage cache bucket: {cache_bucket}")
+
+    parts = cache_bucket.removeprefix("gs://").split("/", 1)
+    bucket = parts[0]
+    prefix = parts[1] if len(parts) > 1 else ""
+
+    return GoogleStorageCache(StorageClient().bucket(bucket), prefix=prefix)
+
+
 @app.default
 def main(
     cache_bucket: str | None = None,
@@ -281,32 +378,20 @@ def main(
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
     tasks = [
+        WyvernPCA,
+        ComputePrincipalComponentsForProductRange,
         ComputePrincipalComponentsForProduct,
         ComputeLocalStatsForChunk,
-        CombineChunkStats,
-        ComputePrincipalComponents,
+        CombineStats,
+        ComputePrincipalComponentsFromStats,
     ]
 
     logger.info(f"Starting runner with {tasks} tasks on {cluster or 'default'} cluster")
 
-    if cache_bucket is not None:
-        if not cache_bucket.startswith("gs://"):
-            raise ValueError("Expected a google storage bucket URL, but got {cache_bucket}")
-
-        logger.info(f"Using a google storage cache bucket: {cache_bucket}")
-
-        parts = cache_bucket.removeprefix("gs://").split("/", 1)
-        bucket = parts[0]
-        prefix = parts[1] if len(parts) > 1 else ""
-
-        cache = GoogleStorageCache(StorageClient().bucket(bucket), prefix=prefix)
-    else:
-        cache = LocalFileSystemCache()
-
     runner = client.runner(
         cluster,
         tasks=tasks,
-        cache=cache,
+        cache=get_cache(cache_bucket),
     )
     runner.run_forever()
 
