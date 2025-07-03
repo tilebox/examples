@@ -292,7 +292,6 @@ class GranuleProductToZarr(Task):
             target_dataset = xr.Dataset(
                 {variable_name: (("time", "y", "x"), target_dataset[variable_name].expand_dims("time").to_numpy())}
             )
-            target_dataset = target_dataset.drop_vars(("spatial_ref", "y", "x"))  # don't write this to zarr, not needed
 
             logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
 
