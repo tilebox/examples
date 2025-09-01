@@ -35,6 +35,6 @@ uv run python submit_job.py
 uv run python download_workflow.py
 ```
 
-This job does not spatio-temporal capabilities yet, so for longer time-periods it will load large amounts of metadata, and might take a while to complete. You can watch the logs, or the Console [Jobs tab](https://console.tilebox.com/workflows/jobs) to follow the progress.
+You can watch the logs, or the Console [Jobs tab](https://console.tilebox.com/workflows/jobs) to follow the progress.
 
 The workflow is not parallelized but could be in case a larger number of nodes is available with independent internet bandwidth.
