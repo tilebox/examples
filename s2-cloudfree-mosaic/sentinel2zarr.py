@@ -163,10 +163,15 @@ class Sentinel2ToZarr(Task):
         initialize_datacube = context.submit_subtask(
             InitializeZarrDatacube(len(locations), geobox.shape.y, geobox.shape.x)
         )
+
+        context.progress("read-granules").add(len(locations))
         read_granules = context.submit_subtask(
             GranulesToZarr((0, len(locations))),
             depends_on=[initialize_datacube],
         )
+
+        n_chunks = math.ceil(geobox.shape.y / SPATIAL_CHUNK_SIZE) * math.ceil(geobox.shape.x / SPATIAL_CHUNK_SIZE)
+        context.progress("compute-mosaic").add(n_chunks)
         context.submit_subtask(
             ComputeMosaic((0, geobox.shape.y), (0, geobox.shape.x)),
             depends_on=[read_granules],
@@ -260,6 +265,9 @@ class GranuleToZarr(Task):
                     context.submit_subtask(
                         GranuleProductToZarr(product, self.time_index),
                     )
+
+        # mark one granule as done
+        context.progress("read-granules").done(1)
 
 
 class GranuleProductToZarr(Task):
@@ -360,6 +368,8 @@ class ComputeMosaic(Task):
                     consolidated=False,
                     zarr_format=3,
                 )
+
+        context.progress("compute-mosaic").done(1)
 
 
 def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, int]]:

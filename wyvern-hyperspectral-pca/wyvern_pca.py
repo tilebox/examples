@@ -200,7 +200,8 @@ class ComputePrincipalComponentsForProduct(Task):
             height, width = file.shape
 
         stats_task = context.submit_subtask(
-            ComputeLocalStatsForChunk(self.product_path, SpatialChunk(0, height, 0, width), output_key="product_stats")
+            ComputeLocalStatsForChunk(self.product_path, SpatialChunk(0, height, 0, width), output_key="product_stats"),
+            max_retries=2,  # in case we hit timeout errors when reading, let's auto-retry
         )
         context.submit_subtask(
             ComputePrincipalComponentsFromStats(
@@ -237,7 +238,8 @@ class ComputeLocalStatsForChunk(Task):
         if len(sub_chunks) > 1:
             # more than a single chunk left, so let's sub-divide the work to allow for parallelism
             compute_local_stats = context.submit_subtasks(
-                [ComputeLocalStatsForChunk(self.product_path, chunk) for chunk in sub_chunks]
+                [ComputeLocalStatsForChunk(self.product_path, chunk) for chunk in sub_chunks],
+                max_retries=2,  # in case we hit timeout errors when reading, let's auto-retry
             )
             # after all sub-chunks are done, we need to aggregate the results
             context.submit_subtask(

@@ -7,8 +7,10 @@ requires-python = ">=3.13"
 dependencies = [
     "cyclopts>=3.19.0",
     "numpy>=2.3.0",
+    "odc-geo>=0.4.10",
     "python-dotenv>=1.1.1",
     "rasterio>=1.4.3",
+    "rio-cogeo>=5.4.2",
     "tilebox-workflows>=0.37.1",
     "vsifile@git+https://github.com/vincentsarago/vsifile.git@main",
 ]
