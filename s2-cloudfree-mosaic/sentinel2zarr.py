@@ -52,8 +52,8 @@ _S2_PRODUCTS = {
 }
 """The S2 products we are reading for each granule"""
 
-ZARR_GCS_BUCKET = "workflow-cache-15c9850"
-ZARR_GCS_PROJECT = "tilebox-production"
+ZARR_GCS_BUCKET = "vci-datacube-bucket-1513742"
+ZARR_GCS_PROJECT = "careful-striker-387117"
 CACHE_PREFIX = "s2-zarr"
 SPATIAL_CHUNK_SIZE = 2048
 
@@ -85,7 +85,7 @@ def sentinel2_data_store() -> ObjectStore:
 @lru_cache
 def zarr_storage(prefix: str) -> ObjectStore:
     """An object store for writing the output Zarr datacube to"""
-    return GCSStore(bucket="workflow-cache-15c9850", prefix=prefix, credential_provider=GoogleCredentialProvider())
+    return GCSStore(bucket=ZARR_GCS_BUCKET, prefix=prefix, credential_provider=GoogleCredentialProvider())
 
 
 @dataclass
