@@ -25,7 +25,7 @@ from pyproj import Transformer
 from rasterio.enums import Resampling
 from shapely import Polygon, box, transform
 from tilebox.datasets import Client as DatasetClient
-from tilebox.datasets.data.time_interval import TimeInterval
+from tilebox.datasets.query import TimeInterval
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.cache import GoogleStorageCache
