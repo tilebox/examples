@@ -1,7 +1,5 @@
-import math
 import os
 import pickle
-from collections.abc import Iterator
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
@@ -114,6 +112,39 @@ class AreaOfInterest:
         target_shape = transform(self.shape, to_target_crs.transform, interleaved=False)  # type: ignore[arg-type]
         return GeoBox.from_bbox(target_shape.bounds, crs=crs, resolution=resolution)
 
+    def chunks(self, crs: str, resolution: int, chunk_size_yx: tuple[int, int]) -> list[Chunk2D]:
+        """Divide the area of interest into chunks of the given size in the target CRS and resolution"""
+        geobox = self.as_geobox(crs, resolution)
+        root_chunk = Chunk2D(0, geobox.shape.y, 0, geobox.shape.x)
+        return root_chunk.sub_chunks(*chunk_size_yx)
+
+
+@dataclass(frozen=True, order=True)
+class Chunk2D:
+    y_start: int
+    y_end: int
+    x_start: int
+    x_end: int
+
+    def __str__(self) -> str:
+        """String representation of the chunk in slice notation."""
+        return f"{self.y_start}:{self.y_end}, {self.x_start}:{self.x_end}"
+
+    def __repr__(self) -> str:
+        return f"Chunk2D({self.y_start}, {self.y_end}, {self.x_start}, {self.x_end})"
+
+    def sub_chunks(self, y_size: int, x_size: int) -> list["Chunk2D"]:
+        """Subdivide a given chunk into sub-chunks, for dividing it for parallel processing."""
+
+        chunks = []
+        for y_start in range(self.y_start, self.y_end, y_size):
+            for x_start in range(self.x_start, self.x_end, x_size):
+                y_end = min(y_start + y_size, self.y_end)
+                x_end = min(x_start + x_size, self.x_end)
+                chunks.append(Chunk2D(y_start, y_end, x_start, x_end))
+
+        return chunks
+
 
 @dataclass
 class RegionOfInterest:
@@ -155,8 +186,6 @@ class Sentinel2ToZarr(Task):
 
         logger.info(f"Found {len(locations)} matching S2 granules")
 
-        context.job_cache["granules"] = "\n".join(locations).encode()  # type: ignore[attr-defined]
-
         geobox = self.roi.area.as_geobox(self.crs, self.resolution)
         context.job_cache["target_grid"] = pickle.dumps(geobox)  # type: ignore[attr-defined]
 
@@ -165,17 +194,18 @@ class Sentinel2ToZarr(Task):
         )
 
         context.progress("read-granules").add(len(locations))
-        read_granules = context.submit_subtask(
-            GranulesToZarr((0, len(locations))),
-            depends_on=[initialize_datacube],
-        )
+        read_granules = [
+            context.submit_subtask(
+                GranuleToZarr(granule, i),
+                depends_on=[initialize_datacube],
+            )
+            for i, granule in enumerate(locations)
+        ]
 
-        n_chunks = math.ceil(geobox.shape.y / SPATIAL_CHUNK_SIZE) * math.ceil(geobox.shape.x / SPATIAL_CHUNK_SIZE)
-        context.progress("compute-mosaic").add(n_chunks)
-        context.submit_subtask(
-            ComputeMosaic((0, geobox.shape.y), (0, geobox.shape.x)),
-            depends_on=[read_granules],
-        )
+        compute_chunks = self.roi.area.chunks(self.crs, self.resolution, (SPATIAL_CHUNK_SIZE, SPATIAL_CHUNK_SIZE))
+        context.progress("compute-mosaic").add(len(compute_chunks))
+        for chunk in compute_chunks:
+            context.submit_subtask(ComputeMosaic(chunk), depends_on=read_granules)
 
 
 class InitializeZarrDatacube(Task):
@@ -222,27 +252,6 @@ class InitializeZarrDatacube(Task):
         dims = f"time={self.n_time}, y={self.n_y}, x={self.n_x}"
         logger.info(f"Successfully initialized a Zarr datacube with shape {dims}")
         context.current_task.display = f"InitZarrCube({dims})"  # type: ignore[attr-defined]
-
-
-class GranulesToZarr(Task):
-    granule_range: tuple[int, int]
-    """Integer range of the queried granules to process in this task"""
-
-    def execute(self, context: ExecutionContext) -> None:
-        # for ideal parallelization, span up a nice processing tree, by subdividing too large ranges into smaller chunks
-        start, end = self.granule_range
-        context.current_task.display = f"GranulesToZarr[{start}:{end}]"  # type: ignore[attr-defined]
-        if end - start > 8:
-            mid = (start + end) // 2
-            context.submit_subtask(GranulesToZarr((start, mid)))
-            context.submit_subtask(GranulesToZarr((mid, end)))
-            return
-
-        granules = context.job_cache["granules"].decode().split("\n")[start:end]  # type: ignore[attr-defined]
-        for i, granule in enumerate(granules):
-            context.submit_subtask(
-                GranuleToZarr(granule, start + i),
-            )
 
 
 class GranuleToZarr(Task):
@@ -323,21 +332,10 @@ class GranuleProductToZarr(Task):
 
 
 class ComputeMosaic(Task):
-    ys: tuple[int, int]
-    xs: tuple[int, int]
+    chunk: Chunk2D
 
     def execute(self, context: ExecutionContext) -> None:
-        chunks = []
-        for y_start, y_end in _split_interval(*self.ys, SPATIAL_CHUNK_SIZE):
-            for x_start, x_end in _split_interval(*self.xs, SPATIAL_CHUNK_SIZE):
-                chunks.append(((y_start, y_end), (x_start, x_end)))
-
-        if len(chunks) > 1:
-            for chunk in chunks:
-                context.submit_subtask(ComputeMosaic(*chunk))
-            return
-
-        (y_start, y_end), (x_start, x_end) = chunks[0]
+        y_start, y_end, x_start, x_end = self.chunk.y_start, self.chunk.y_end, self.chunk.x_start, self.chunk.x_end
         context.current_task.display = f"ComputeMosaic(y={y_start}:{y_end}, x={x_start}:{x_end})"  # type: ignore[attr-defined]
 
         tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
@@ -372,24 +370,6 @@ class ComputeMosaic(Task):
         context.progress("compute-mosaic").done(1)
 
 
-def _split_interval(start: int, end: int, max_size: int) -> Iterator[tuple[int, int]]:
-    """
-    Split an interval into two sub-intervals in case it is larger than the given maximum size.
-    The split is done at the closest power of two.
-
-    Example:
-        _split_interval(0, 1000, 512) -> (0, 512), (512, 1000)
-        _split_interval(512, 1000, 512) -> (512, 1000)
-    """
-    n = end - start
-    if n > max_size:
-        split_at = 2 ** math.floor(math.log2(n - 1)) + start
-        yield start, split_at
-        yield split_at, end
-    else:
-        yield start, end
-
-
 app = App()
 
 
@@ -411,7 +391,6 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
     selected_tasks = [
         Sentinel2ToZarr,
         InitializeZarrDatacube,
-        GranulesToZarr,
         GranuleToZarr,
         GranuleProductToZarr,
         ComputeMosaic,
@@ -420,7 +399,6 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
         selected_tasks = [
             Sentinel2ToZarr,
             InitializeZarrDatacube,
-            GranulesToZarr,
             ComputeMosaic,
         ]
     elif tasks == "data-only":
