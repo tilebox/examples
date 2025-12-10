@@ -1,0 +1,23 @@
+# Secrets
+.env
+
+# Python-generated files
+__pycache__/
+*.py[oc]
+build/
+dist/
+wheels/
+*.egg-info
+
+# Virtual environments
+.venv
+
+# Jupyter / Notebooks
+.ipynb_checkpoints/
+
+# Images
+*.png
+*.tif
+
+# Model weights
+clay-v1.5.ckpt
