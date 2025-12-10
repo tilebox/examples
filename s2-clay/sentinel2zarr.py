@@ -57,7 +57,7 @@ _S2_PRODUCTS = {
 }
 """The S2 products we are reading for each granule"""
 
-ZARR_GCS_BUCKET = "vci-datacube-bucket-1513742"
+ZARR_GCS_BUCKET = "creodias-data"
 ZARR_GCS_PROJECT = "careful-striker-387117"
 CACHE_PREFIX = "s2-clay"
 SPATIAL_CHUNK_SIZE = 256
