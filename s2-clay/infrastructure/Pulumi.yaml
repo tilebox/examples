@@ -1,0 +1,19 @@
+name: s2-clay
+description: Sentinel-2 Clay based change detection Tilebox Workflow on Open Telekom Cloud
+runtime:
+  name: python
+  options:
+    toolchain: uv
+config:
+    opentelekomcloud:authUrl:
+        value: https://iam.eu-de.otc.t-systems.com/v3
+    opentelekomcloud:domainName:
+        value: 'OTC00000000001000166817'
+    opentelekomcloud:tenantName:
+        value: 'eu-nl'
+packages:
+  opentelekomcloud:
+    source: terraform-provider
+    version: 1.0.2
+    parameters:
+      - opentelekomcloud/opentelekomcloud

@@ -1,0 +1,7 @@
+config:
+  opentelekomcloud:secretKey:
+    secure: AAABAPTUQJJVNxTxQ8LDlBPrj19fYk7OO5dpXlC33UQcnYnd/fAeMcYh/Z7LcuvJIXeT+jVnpAPvewEdbxDp3na+DnxfN2WH
+  opentelekomcloud:accessKey:
+    secure: AAABADi4AtGJVRErlbS1Ff5IeLGtLWWzN0LUrH/Er/JWMYDbmMUVkYCDiT+So0q4PkY2uw==
+  tailscale:authKey:
+    secure: AAABAPnBHiuTwr/SBbMn3kEARr0B2+tt/4sJKWvUzCuofntyLlUgYaRdDjEmaHjWe7yDsNy8wzz/LRT25CENMuKzueBAfXUzyDkrF1mPIx/lrdMJjczx22FpuNH9
