@@ -3,20 +3,19 @@ import pickle
 from dataclasses import dataclass
 from functools import lru_cache
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
-import dask.array
+import boto3
 import numpy as np
 import rasterio
 import xarray as xr
+import zarr
 from boto3 import Session
 from cyclopts import App
 from dotenv import load_dotenv
-from google.cloud.storage import Client as StorageClient
 from numpy.typing import DTypeLike
 from obstore.auth.boto3 import Boto3CredentialProvider
-from obstore.auth.google import GoogleCredentialProvider
-from obstore.store import GCSStore, LocalStore, ObjectStore, S3Store
+from obstore.store import LocalStore, ObjectStore, S3Store
 from odc.geo.geobox import GeoBox
 from odc.geo.xr import wrap_xr
 from pyproj import Transformer
@@ -26,7 +25,7 @@ from tilebox.datasets import Client as DatasetClient
 from tilebox.datasets.query import TimeInterval
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
-from tilebox.workflows.cache import GoogleStorageCache
+from tilebox.workflows.cache import AmazonS3Cache
 from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
 from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
 from zarr.codecs import BloscCodec
@@ -42,25 +41,30 @@ class S2Product:
     dtype: DTypeLike
 
 
-_S2_PRODUCTS = {
-    "B02": S2Product("blue band", 20, np.uint16),
-    "B03": S2Product("green band", 20, np.uint16),
-    "B04": S2Product("red band", 20, np.uint16),
-    "B05": S2Product("red edge 1 band", 20, np.uint16),
-    "B06": S2Product("red edge 2 band", 20, np.uint16),
-    "B07": S2Product("red edge 3 band", 20, np.uint16),
-    "B0A": S2Product("broad NIR band", 10, np.uint16),
-    "B8A": S2Product("narrow NIR band", 20, np.uint16),
-    "B11": S2Product("SWIR 1 band", 20, np.uint16),
-    "B12": S2Product("SWIR 2 band", 20, np.uint16),
-    "SCL": S2Product("scene classification", 20, np.uint8),
+_SCENE_CLASSIFICATION_PRODUCT = S2Product("scene_classification", 20, np.uint8)
+_S2_BANDS = {
+    "B02": S2Product("blue", 10, np.uint16),
+    "B03": S2Product("green", 10, np.uint16),
+    "B04": S2Product("red", 10, np.uint16),
+    "B05": S2Product("rededge1", 20, np.uint16),
+    "B06": S2Product("rededge2", 20, np.uint16),
+    "B07": S2Product("rededge3", 20, np.uint16),
+    "B08": S2Product("nir", 10, np.uint16),
+    "B8A": S2Product("nir08", 20, np.uint16),
+    "B11": S2Product("swir16", 20, np.uint16),
+    "B12": S2Product("swir22", 20, np.uint16),
 }
-"""The S2 products we are reading for each granule"""
+_S2_PRODUCTS = {
+    **_S2_BANDS,
+    "SCL": _SCENE_CLASSIFICATION_PRODUCT,
+}
+"""The S2 bands we are reading for each granule"""
 
-ZARR_GCS_BUCKET = "creodias-data"
-ZARR_GCS_PROJECT = "careful-striker-387117"
-CACHE_PREFIX = "s2-clay"
+
+OUTPUT_BUCKET = "s2-clay"
+OUTPUT_ZARR_PREFIX = "sentinel2-zarr"
 SPATIAL_CHUNK_SIZE = 256
+COMPRESSOR = BloscCodec(cname="lz4hc", clevel=5, shuffle="shuffle")
 
 
 @lru_cache
@@ -88,9 +92,19 @@ def sentinel2_data_store() -> ObjectStore:
 
 
 @lru_cache
-def zarr_storage(prefix: str) -> ObjectStore:
+def output_bucket(prefix: str) -> ObjectStore:
     """An object store for writing the output Zarr datacube to"""
-    return GCSStore(bucket=ZARR_GCS_BUCKET, prefix=prefix, credential_provider=GoogleCredentialProvider())
+    return S3Store(
+        bucket=OUTPUT_BUCKET,
+        endpoint="https://obs.eu-nl.otc.t-systems.com",
+        prefix=prefix,
+        access_key_id=os.environ["OTC_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["OTC_SECRET_ACCESS_KEY"],
+    )
+
+
+def open_zarr_store(path: str) -> ZarrObjectStore:
+    return ZarrObjectStore(output_bucket(path))
 
 
 @dataclass(frozen=True, order=True)
@@ -221,42 +235,48 @@ class InitializeZarrDatacube(Task):
     n_x: int
 
     def execute(self, context: ExecutionContext) -> None:
-        dataset = xr.Dataset()
-        encodings = {}
-        compressor = BloscCodec(cname="lz4hc", clevel=5, shuffle="shuffle")
+        zarr_store = open_zarr_store(f"{OUTPUT_ZARR_PREFIX}/{context.current_task.job.id}/cube")  # type: ignore[attr-defined]
+
+        n_band = len(_S2_BANDS)
+
         for variable_name, product in _S2_PRODUCTS.items():
-            dataset[variable_name] = (
-                ["time", "y", "x"],
-                dask.array.zeros(
-                    (self.n_time, self.n_y, self.n_x),
-                    chunks=(1, SPATIAL_CHUNK_SIZE, SPATIAL_CHUNK_SIZE),
-                    dtype=product.dtype,
-                ),
-            )
-            dataset.attrs["long_name"] = product.name
-            encodings[variable_name] = {"compressors": (compressor,)}
-
-        dataset["mosaic"] = (
-            ["band", "y", "x"],
-            dask.array.zeros(
-                (10, self.n_y, self.n_x),
+            zarr.create_array(
+                store=zarr_store,
+                name=variable_name,
+                shape=(self.n_time, self.n_y, self.n_x),
                 chunks=(1, SPATIAL_CHUNK_SIZE, SPATIAL_CHUNK_SIZE),
-                dtype=np.uint16,
-            ),
-        )
-        encodings["mosaic"] = {"_FillValue": 0, "scale_factor": 1 / 10000, "compressors": (compressor,)}
+                dimension_names=("time", "y", "x"),
+                dtype=product.dtype,
+                compressors=COMPRESSOR,
+                fill_value=0,
+                attributes={
+                    "band_name": product.name,
+                },
+            )
 
-        zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
-        zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
-        dataset.to_zarr(
-            zarr_store,  # type: ignore[arg-type]
-            encoding=encodings,
-            compute=False,
-            mode="w",
-            consolidated=False,
-            zarr_format=3,
+        zarr.create_array(
+            store=zarr_store,
+            name="mosaic",
+            shape=(n_band, self.n_y, self.n_x),
+            chunks=(1, SPATIAL_CHUNK_SIZE, SPATIAL_CHUNK_SIZE),
+            dimension_names=("band", "y", "x"),
+            dtype=np.uint16,
+            compressors=COMPRESSOR,
+            fill_value=0,
         )
-        dims = f"time={self.n_time}, y={self.n_y}, x={self.n_x}"
+
+        bands = zarr.create_array(
+            store=zarr_store,
+            name="band",
+            shape=(n_band,),
+            chunks=(n_band,),
+            dimension_names=("band",),
+            dtype="S20",
+            compressors=COMPRESSOR,
+        )
+        bands[:] = [product.name for product in _S2_PRODUCTS.values()]
+
+        dims = f"time={self.n_time}, y={self.n_y}, x={self.n_x}, band={n_band}"
         logger.info(f"Successfully initialized a Zarr datacube with shape {dims}")
         context.current_task.display = f"InitZarrCube({dims})"  # type: ignore[attr-defined]
 
@@ -294,11 +314,11 @@ class GranuleProductToZarr(Task):
     """The time index of the granule in the output Zarr datacube"""
 
     def execute(self, context: ExecutionContext) -> None:
-        variable_name = Path(self.product_location).stem.split("_")[-2]  # B02, B03, B04 or SCL
+        variable_name = Path(self.product_location).stem.split("_")[-2]  # B02, B03, B04, ..., B11, B12, SCL
         context.current_task.display = f"ProductToZarr({variable_name})"  # type: ignore[attr-defined]
 
         tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
-        with tracer.start_span("read_product"):
+        with tracer.start_span(f"read_product/{variable_name}"):
             logger.info(f"Reading product {self.product_location}")
             buffer = bytes(sentinel2_data_store().get(self.product_location).bytes())
             logger.info(f"Product read, size={len(buffer)} bytes")
@@ -307,34 +327,21 @@ class GranuleProductToZarr(Task):
                 arr = product.read(1)
                 src_grid = GeoBox(shape=arr.shape, affine=product.transform, crs=product.crs)
 
-        with tracer.start_span("reproject"):
+        with tracer.start_span(f"reproject/{variable_name}"):
             dataset = xr.Dataset({variable_name: (["y", "x"], arr)})
             dataset[variable_name] = wrap_xr(dataset[variable_name], gbox=src_grid)  # add source spatial_ref metadata
 
             target_grid: GeoBox = pickle.loads(context.job_cache["target_grid"])  # type: ignore[attr-defined]  # noqa: S301
             target_dataset = dataset.odc.reproject(how=target_grid, resampling=Resampling.nearest, dst_nodata=0)
-            target_dataset = xr.Dataset(
-                {variable_name: (("time", "y", "x"), target_dataset[variable_name].expand_dims("time").to_numpy())}
-            )
-
+            reprojected_product = target_dataset[variable_name].expand_dims("time").to_numpy()
             logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
 
-        with tracer.start_span("write_zarr"):
-            zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
-            zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
-            target_dataset.to_zarr(
-                zarr_store,  # type: ignore[arg-type]
-                region={
-                    "time": slice(self.time_index, self.time_index + 1),
-                    "y": slice(0, target_grid.shape.y),
-                    "x": slice(0, target_grid.shape.x),
-                },
-                write_empty_chunks=False,
-                safe_chunks=False,  # our grid size is not an exact multiple of chunk size
-                consolidated=False,
-                zarr_format=3,
+        with tracer.start_span(f"write_to_zarr/{variable_name}"):
+            zarr_group = zarr.open_group(
+                open_zarr_store(f"{OUTPUT_ZARR_PREFIX}/{context.current_task.job.id}/cube"), mode="a"
             )
-
+            product_array: zarr.Array = zarr_group[variable_name]  # type: ignore[arg-type]
+            product_array[self.time_index, :, :] = reprojected_product
             logger.info(f"Successfully wrote variable {variable_name} to Zarr datacube")
 
 
@@ -347,37 +354,43 @@ class ComputeMosaic(Task):
 
         tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
 
-        zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
-        zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
+        zarr_prefix = f"{OUTPUT_ZARR_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
+        zarr_store = open_zarr_store(zarr_prefix)
         cube = xr.open_zarr(zarr_store, zarr_format=3, consolidated=False)
+
+        mosaic: zarr.Array = zarr.open_group(zarr_store, mode="a")["mosaic"]  # type: ignore[arg-type]
 
         valid = cube.SCL[:, y_start:y_end, x_start:x_end].isin([2, 4, 5, 6, 11]).compute()
 
-        for i, band in enumerate(["B04", "B03", "B02"]):  # red, green, blue
+        for i, band in enumerate(_S2_BANDS):
             with tracer.start_span(f"band_{band}"):
                 has_data = cube[band][:, y_start:y_end, x_start:x_end] != 0
-                mosaic_arr = (
-                    cube[band][:, y_start:y_end, x_start:x_end].where(valid & has_data).quantile(0.25, dim="time")
-                    / 10000
-                ).compute()
-                mosaic = xr.Dataset({"mosaic": mosaic_arr}).drop_vars("quantile").expand_dims({"band": 1})
-                mosaic.to_zarr(
-                    zarr_store,  # type: ignore[arg-type]
-                    region={
-                        "band": slice(i, i + 1),
-                        "y": slice(y_start, y_end),
-                        "x": slice(x_start, x_end),
-                    },
-                    write_empty_chunks=False,
-                    safe_chunks=False,  # our grid size is not an exact multiple of chunk size
-                    consolidated=False,
-                    zarr_format=3,
+                mosaic_band = (
+                    (
+                        cube[band][:, y_start:y_end, x_start:x_end]
+                        .where(valid & has_data)
+                        .quantile(0.25, dim="time")
+                        .astype(np.uint16)
+                    )
+                    .compute()
+                    .to_numpy()
                 )
+                mosaic[i, y_start:y_end, x_start:x_end] = mosaic_band
 
         context.progress("compute-mosaic").done(1)
 
 
 app = App()
+
+
+class OTCBucketCache(AmazonS3Cache):
+    def __init__(self, bucket: str, s3_client: Any, prefix: str = "jobs") -> None:
+        self.bucket = bucket
+        self.prefix = Path(prefix)
+        self._s3 = s3_client
+
+    def group(self, key: str) -> "OTCBucketCache":
+        return OTCBucketCache(self.bucket, self._s3, prefix=(self.prefix / key).as_posix())
 
 
 @app.default
@@ -393,7 +406,14 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
 
     client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
 
-    cache = GoogleStorageCache(StorageClient(project=ZARR_GCS_PROJECT).bucket(ZARR_GCS_BUCKET), prefix=CACHE_PREFIX)
+    cache_client = boto3.client(
+        "s3",
+        endpoint_url="https://obs.eu-nl.otc.t-systems.com",
+        aws_access_key_id=os.environ["OTC_ACCESS_KEY_ID"],
+        aws_secret_access_key=os.environ["OTC_SECRET_ACCESS_KEY"],
+        region_name="eu-nl",
+    )
+    cache = OTCBucketCache(OUTPUT_BUCKET, cache_client, prefix="cache/jobs")
 
     selected_tasks = [
         Sentinel2ToZarr,
