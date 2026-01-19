@@ -340,6 +340,7 @@ class GranuleProductToZarr(Task):
             zarr_group = zarr.open_group(
                 open_zarr_store(f"{OUTPUT_ZARR_PREFIX}/{context.current_task.job.id}/cube"), mode="a"
             )
+
             product_array: zarr.Array = zarr_group[variable_name]  # type: ignore[arg-type]
             product_array[self.time_index, :, :] = reprojected_product
             logger.info(f"Successfully wrote variable {variable_name} to Zarr datacube")
@@ -370,6 +371,8 @@ class ComputeMosaic(Task):
                         cube[band][:, y_start:y_end, x_start:x_end]
                         .where(valid & has_data)
                         .quantile(0.25, dim="time")
+                        .fillna(0)
+                        .clip(0, np.iinfo(np.uint16).max)
                         .astype(np.uint16)
                     )
                     .compute()
