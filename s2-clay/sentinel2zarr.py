@@ -333,7 +333,7 @@ class GranuleProductToZarr(Task):
 
             target_grid: GeoBox = pickle.loads(context.job_cache["target_grid"])  # type: ignore[attr-defined]  # noqa: S301
             target_dataset = dataset.odc.reproject(how=target_grid, resampling=Resampling.nearest, dst_nodata=0)
-            reprojected_product = target_dataset[variable_name].expand_dims("time").to_numpy()
+            reprojected_product = target_dataset[variable_name].to_numpy()
             logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
 
         with tracer.start_span(f"write_to_zarr/{variable_name}"):
