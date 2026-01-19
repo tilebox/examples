@@ -10,11 +10,10 @@ import numpy as np
 import rasterio
 import xarray as xr
 import zarr
-from boto3 import Session
+from botocore.config import Config
 from cyclopts import App
 from dotenv import load_dotenv
 from numpy.typing import DTypeLike
-from obstore.auth.boto3 import Boto3CredentialProvider
 from obstore.store import LocalStore, ObjectStore, S3Store
 from odc.geo.geobox import GeoBox
 from odc.geo.xr import wrap_xr
@@ -87,7 +86,8 @@ def sentinel2_data_store() -> ObjectStore:
     return S3Store(
         bucket="eodata",
         endpoint="https://eodata.dataspace.copernicus.eu",
-        credential_provider=Boto3CredentialProvider(Session(profile_name="copernicus-dataspace")),
+        access_key_id=os.environ["COPERNICUS_ACCESS_KEY_ID"],
+        secret_access_key=os.environ["COPERNICUS_SECRET_ACCESS_KEY"],
     )
 
 
@@ -412,6 +412,8 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
         aws_access_key_id=os.environ["OTC_ACCESS_KEY_ID"],
         aws_secret_access_key=os.environ["OTC_SECRET_ACCESS_KEY"],
         region_name="eu-nl",
+        # without this boto will append x-amz-checksum-crc32:... to the contents of uploaded blobs
+        config=Config(request_checksum_calculation="when_required", response_checksum_validation="when_required"),
     )
     cache = OTCBucketCache(OUTPUT_BUCKET, cache_client, prefix="cache/jobs")
 
