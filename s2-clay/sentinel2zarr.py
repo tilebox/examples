@@ -183,6 +183,9 @@ class Sentinel2ToZarr(Task):
     crs: str
     """The target CRS to use for the output grid"""
 
+    max_cloud_cover: float
+    """The maximum cloud cover percentage to accept for a granule (0 - 100)"""
+
     resolution: float
     """The target resolution for our output grid, in units of the target CRS"""
 
@@ -199,6 +202,8 @@ class Sentinel2ToZarr(Task):
             return
 
         granules = xr.concat(collection_granules, dim="time").sortby("time")
+        granules = granules.isel(time=(granules.cloud_cover <= self.max_cloud_cover))
+
         locations = [str(location).removeprefix("/eodata/") for location in granules.location.values]
 
         if len(locations) == 0:
@@ -343,7 +348,19 @@ class GranuleProductToZarr(Task):
             )
 
             product_array: zarr.Array = zarr_group[variable_name]  # type: ignore[arg-type]
-            product_array[self.time_index, :, :] = reprojected_product
+
+            # for very large target grids most of the pixels are nodata, so to speed up the write we only write the
+            # regions that have data
+            has_data = reprojected_product > 0
+            if not has_data.any():
+                logger.info(f"No data to write for variable {variable_name}, skipping")
+                return
+            xs = np.nonzero(has_data.any(axis=0))[0]
+            ys = np.nonzero(has_data.any(axis=1))[0]
+            xmin, xmax = xs.min(), xs.max() + 1
+            ymin, ymax = ys.min(), ys.max() + 1
+
+            product_array[self.time_index, ymin:ymax, xmin:xmax] = reprojected_product[ymin:ymax, xmin:xmax]
             logger.info(f"Successfully wrote variable {variable_name} to Zarr datacube")
 
         context.progress("read-product").done(1)
