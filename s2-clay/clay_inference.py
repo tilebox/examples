@@ -16,6 +16,7 @@ from claymodel.module import ClayMAEModule
 from cyclopts import App
 from dotenv import load_dotenv
 from odc.geo.geobox import GeoBox
+from sklearn.metrics.pairwise import cosine_distances
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
@@ -248,11 +249,86 @@ class ClayInferenceTile(Task):
         context.progress("inference").done(1)
 
 
+class ComputeEmbeddingDelta(Task):
+    input_zarr_1: tuple[str, str]
+    input_zarr_2: tuple[str, str]
+    output_zarr: tuple[str, str]
+
+    def execute(self, context: ExecutionContext) -> None:
+        array1 = open_dataset(self.input_zarr_1[0])[self.input_zarr_1[1]]
+        array2 = open_dataset(self.input_zarr_2[0])[self.input_zarr_2[1]]
+
+        if array1.shape != array2.shape:
+            raise ValueError(f"Array shapes do not match: {array1.shape} != {array2.shape}")
+
+        ny, nx, _ = array1.shape
+        chunk_size = CLAY_INFERENCE_TILE_SIZE // CLAY_PATCH_SIZE  # 32
+
+        output_group, output_array = self.output_zarr
+        store = open_zarr_store(output_group)
+        zarr.create_array(
+            store=store,
+            name=output_array,
+            shape=(ny, nx),
+            chunks=(chunk_size, chunk_size),
+            dimension_names=("y", "x"),
+            compressors=COMPRESSOR,
+            dtype=np.float32,
+            overwrite=True,
+        )
+
+        chunks = Chunk2D(0, ny, 0, nx).sub_chunks(
+            CLAY_INFERENCE_TILE_SIZE // CLAY_PATCH_SIZE, CLAY_INFERENCE_TILE_SIZE // CLAY_PATCH_SIZE
+        )
+        for chunk in chunks:
+            context.submit_subtask(
+                ComputeEmbeddingDeltaTile(
+                    chunk,
+                    self.input_zarr_1,
+                    self.input_zarr_2,
+                    self.output_zarr,
+                )
+            )
+        context.progress("compute-delta").add(len(chunks))
+
+
+class ComputeEmbeddingDeltaTile(Task):
+    chunk: Chunk2D
+    input_zarr_1: tuple[str, str]
+    input_zarr_2: tuple[str, str]
+    output_zarr: tuple[str, str]
+
+    def execute(self, context: ExecutionContext) -> None:
+        array1 = open_dataset(self.input_zarr_1[0])[self.input_zarr_1[1]]
+        array2 = open_dataset(self.input_zarr_2[0])[self.input_zarr_2[1]]
+
+        chunk = self.chunk
+        patches1 = array1[chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end, :].to_numpy()
+        patches2 = array2[chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end, :].to_numpy()
+
+        if patches1.shape != patches2.shape:
+            raise ValueError(f"Array shapes do not match: {patches1.shape} != {patches2.shape}")
+
+        ny, nx, n_embedding = patches1.shape
+        cosine_distance_matrix = cosine_distances(
+            patches1.reshape(ny * nx, n_embedding), patches2.reshape(ny * nx, n_embedding)
+        )
+        # the diagonal of our matrix contains the values we are interested in
+        delta = cosine_distance_matrix[np.diag_indices(ny * nx)].reshape(ny, nx)
+
+        output_group, output_array = self.output_zarr
+        zarr_group = zarr.open_group(open_zarr_store(output_group), mode="a")
+        zarr_array: zarr.Array = zarr_group[output_array]  # type: ignore[arg-type]
+        zarr_array[chunk.y_start : chunk.y_end, chunk.x_start : chunk.x_end] = delta
+
+        context.progress("compute-delta").done(1)
+
+
 app = App()
 
 
 @app.default
-def main(cluster: str | None = None) -> None:
+def main(cluster: str | None = None, preload_model: bool = False) -> None:
     if Path(".env").exists():
         assert load_dotenv()
 
@@ -276,6 +352,12 @@ def main(cluster: str | None = None) -> None:
     cache = OTCBucketCache(OUTPUT_BUCKET, cache_client, prefix="cache/jobs")
 
     logger.info(f"Starting runner on {cluster or 'default'} cluster")
+
+    if preload_model:
+        # preload the model weights into memory
+        logger.info("Preloading model weights into memory")
+        clay_model()
+        logger.info("Model weights preloaded")
 
     runner = client.runner(
         cluster,

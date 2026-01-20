@@ -52,7 +52,7 @@ su - ubuntu <<'EOF'
     mise use -g go@1.25.5
 
     # install call-in-parallel
-    go install github.com/tilebox/call-in-parallel@latest
+    git@github.com:tilebox/examples.git
 EOF
 """
 
@@ -152,7 +152,7 @@ for i in range(1, n_cpu_workers + 1):
     ComputeInstance(f"cpu-worker-{i:02d}", "c7n.2xlarge.4", ubuntu_image.id)
 
 
-n_gpu_workers = 1
+n_gpu_workers = 4
 for i in range(1, n_gpu_workers + 1):
     ComputeInstance(
         f"gpu-worker-{i:02d}",

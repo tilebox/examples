@@ -102,6 +102,7 @@ def output_bucket(prefix: str) -> ObjectStore:
     )
 
 
+@lru_cache
 def open_zarr_store(path: str) -> ZarrObjectStore:
     return ZarrObjectStore(output_bucket(path))
 
