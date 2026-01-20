@@ -361,7 +361,7 @@ def main(cluster: str | None = None, preload_model: bool = False) -> None:
 
     runner = client.runner(
         cluster,
-        tasks=[ClayInferenceOnMosaic, ClayInferenceTile],
+        tasks=[ClayInferenceOnMosaic, ClayInferenceTile, ComputeEmbeddingDelta, ComputeEmbeddingDeltaTile],
         cache=cache,
     )
     runner.run_forever()
