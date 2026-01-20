@@ -5,3 +5,15 @@ config:
     secure: AAABADi4AtGJVRErlbS1Ff5IeLGtLWWzN0LUrH/Er/JWMYDbmMUVkYCDiT+So0q4PkY2uw==
   tailscale:authKey:
     secure: AAABAPnBHiuTwr/SBbMn3kEARr0B2+tt/4sJKWvUzCuofntyLlUgYaRdDjEmaHjWe7yDsNy8wzz/LRT25CENMuKzueBAfXUzyDkrF1mPIx/lrdMJjczx22FpuNH9
+  runner:tileboxApiKey:
+    secure: AAABABWf/0WqlIjt6L0qYZYl6sTLXvqi1LfFYqJxE5Y+JjRD5PEBqGe9mOECAdE+vtDDXKMV/jbBL1Bz9kA0dgVLRJjZo9PUxHqM5k+D5cfaLZd85ucaag0=
+  runner:axiomApiKey:
+    secure: AAABAKbcXSUX4sG5MrbhoDBT834Qg1Qmfbr58+951vac8bHagQ2SZDptYztRUAJi41/K2veF7X+vVvPr8l/8MsWAemB59BjMdw==
+  runner:otcAccessKeyId:
+    secure: AAABAJ/+jPAFit0crMZ1G+bw0bDBRtsdABbI2U6I7xh/UwhhJKIszxLEF3+ykZleiLjP3Q==
+  runner:otcSecretAccessKey:
+    secure: AAABANXIIyxfGQMoRfOvVAcFboRGl07LfC/ccefAeM9B1xpbh72urgcdbvsZ69QCqXHEWgzbWVJusuirZO3Oc6YR+cph6kWu
+  runner:copernicusAccessKeyId:
+    secure: AAABAJbfhOCq4dV7hqCt/MZxDj5s9TnY9m0oQKPPRGxhk97JQdGvhzC9Zux7+q1dM8K44w==
+  runner:copernicusSecresAccessKey:
+    secure: AAABAGOe66VNDwO7Bt6aJjF+ni35DcbSrXsXJ//7oOnUKRW9/SBf25NmvFMT5voMoE/k7Ywnt63hUrc5S+ZdLruJBRka7g0n

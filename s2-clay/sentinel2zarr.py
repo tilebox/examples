@@ -21,7 +21,6 @@ from pyproj import Transformer
 from rasterio.enums import Resampling
 from shapely import Polygon, box, transform
 from tilebox.datasets import Client as DatasetClient
-from tilebox.datasets.query import TimeInterval
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.cache import AmazonS3Cache
@@ -146,7 +145,7 @@ class AreaOfInterest:
         """The area of interest as a shapely Polygon"""
         return box(self.degrees_west, self.degrees_south, self.degrees_east, self.degrees_north)
 
-    def as_geobox(self, crs: str, resolution: int) -> GeoBox:
+    def as_geobox(self, crs: str, resolution: float) -> GeoBox:
         """Convert the area of interest into a GeoBox in the given target coordinate reference system and resolution
 
         Args:
@@ -160,7 +159,7 @@ class AreaOfInterest:
         target_shape = transform(self.shape, to_target_crs.transform, interleaved=False)  # type: ignore[arg-type]
         return GeoBox.from_bbox(target_shape.bounds, crs=crs, resolution=resolution)
 
-    def chunks(self, crs: str, resolution: int, chunk_size_yx: tuple[int, int]) -> list[Chunk2D]:
+    def chunks(self, crs: str, resolution: float, chunk_size_yx: tuple[int, int]) -> list[Chunk2D]:
         """Divide the area of interest into chunks of the given size in the target CRS and resolution"""
         geobox = self.as_geobox(crs, resolution)
         root_chunk = Chunk2D(0, geobox.shape.y, 0, geobox.shape.x)
@@ -170,7 +169,7 @@ class AreaOfInterest:
 @dataclass
 class RegionOfInterest:
     area: AreaOfInterest
-    time: TimeInterval
+    time: tuple[str, str]
 
 
 class Sentinel2ToZarr(Task):
@@ -183,7 +182,7 @@ class Sentinel2ToZarr(Task):
     crs: str
     """The target CRS to use for the output grid"""
 
-    resolution: int
+    resolution: float
     """The target resolution for our output grid, in units of the target CRS"""
 
     def execute(self, context: ExecutionContext) -> None:
@@ -298,6 +297,7 @@ class GranuleToZarr(Task):
             for obj in page:
                 product = obj["path"]
                 if any(product.endswith(suffix) for suffix in suffixes):
+                    context.progress("read-product").add(1)
                     context.submit_subtask(
                         GranuleProductToZarr(product, self.time_index),
                     )
@@ -344,6 +344,8 @@ class GranuleProductToZarr(Task):
             product_array: zarr.Array = zarr_group[variable_name]  # type: ignore[arg-type]
             product_array[self.time_index, :, :] = reprojected_product
             logger.info(f"Successfully wrote variable {variable_name} to Zarr datacube")
+
+        context.progress("read-product").done(1)
 
 
 class ComputeMosaic(Task):
