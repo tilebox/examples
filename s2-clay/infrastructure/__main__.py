@@ -152,7 +152,7 @@ for i in range(1, n_cpu_workers + 1):
     ComputeInstance(f"cpu-worker-{i:02d}", "c7n.2xlarge.4", ubuntu_image.id)
 
 
-n_gpu_workers = 4
+n_gpu_workers = 0
 for i in range(1, n_gpu_workers + 1):
     ComputeInstance(
         f"gpu-worker-{i:02d}",

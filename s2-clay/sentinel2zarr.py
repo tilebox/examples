@@ -84,7 +84,7 @@ def sentinel2_data_store() -> ObjectStore:
 
     return S3Store(
         bucket="eodata",
-        endpoint="https://eodata.dataspace.copernicus.eu",
+        endpoint="https://eodata.ams.dataspace.copernicus.eu",
         access_key_id=os.environ["COPERNICUS_ACCESS_KEY_ID"],
         secret_access_key=os.environ["COPERNICUS_SECRET_ACCESS_KEY"],
     )
@@ -381,10 +381,12 @@ class ComputeMosaic(Task):
 
         mosaic: zarr.Array = zarr.open_group(zarr_store, mode="a")["mosaic"]  # type: ignore[arg-type]
 
+        logger.info("Computing valid pixel mask")
         valid = cube.SCL[:, y_start:y_end, x_start:x_end].isin([2, 4, 5, 6, 11]).compute()
 
         for i, band in enumerate(_S2_BANDS):
             with tracer.start_span(f"band_{band}"):
+                logger.info(f"Computing mosaic for band {band} for chunk {self.chunk}")
                 has_data = cube[band][:, y_start:y_end, x_start:x_end] != 0
                 mosaic_band = (
                     (
@@ -398,7 +400,9 @@ class ComputeMosaic(Task):
                     .compute()
                     .to_numpy()
                 )
+                logger.info(f"Computed mosaic for band {band} for chunk {self.chunk}")
                 mosaic[i, y_start:y_end, x_start:x_end] = mosaic_band
+                logger.info(f"Wrote mosaic band {band} to Zarr for chunk {self.chunk}")
 
         context.progress("compute-mosaic").done(1)
 
