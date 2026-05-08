@@ -1,7 +1,6 @@
 import numpy as np
 import xarray as xr
 from shapely import Polygon
-from tilebox.workflows.observability.logging import get_logger
 
 
 def polygon_from_poi(lon: float = 0.0, lat: float = 0.0) -> Polygon:
@@ -17,9 +16,7 @@ def polygon_from_poi(lon: float = 0.0, lat: float = 0.0) -> Polygon:
 
 
 # select_least_cloudy_granules finds the granules that contain the point of interest with the lowest cloud cover
-def select_least_cloudy_granules(data: xr.Dataset) -> xr.Dataset:
-    logger = get_logger()
-
+def select_least_cloudy_granules(data: xr.Dataset, logger) -> xr.Dataset:
     coordinate_indices = np.unique(data.coordinate_idx.values)
 
     result = None
@@ -30,8 +27,8 @@ def select_least_cloudy_granules(data: xr.Dataset) -> xr.Dataset:
         logger.debug(f"Coordinate {i:.0f} has {len(poi_data.time)} valid granules")
 
         poi_data = poi_data.sortby("cloud_cover")
-        logger.debug(f"  Sorted by cloud cover")
-        logger.debug(f"  Cloud covers (limited to 5 values):")
+        logger.debug("  Sorted by cloud cover")
+        logger.debug("  Cloud covers (limited to 5 values):")
         for granule_index, cloud_cover in enumerate(poi_data.cloud_cover.values):
             granule = poi_data.isel(time=granule_index)
             logger.debug(f"    {granule_index}: {granule.id.values}: {cloud_cover}")

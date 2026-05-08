@@ -41,7 +41,7 @@ aws_secret_access_key=j...
 1. Copy `.env.example` to `.env`
     - set a `TILEBOX_API_KEY` which you generate via the [Tilebox console](https://console.tilebox.com)
     - set a proper `RUNNER_NAME` to identify this machine in logs and traces
-    - to enable observability to [Axiom](https://axiom.co/) specify an `AXIOM_API_KEY`
+    - logs and traces are exported to Tilebox automatically by the workflow client
 
 2. Start a runner
 
@@ -101,5 +101,4 @@ The workflow consists of three steps:
 ## Visualization
 
 Interactively visualizing the mosaic from Zarr directly isn't well supported yet, therefore as a final post-processing step we convert the Zarr mosaic to a `GeoTIFF` using `rasterio` and then to a COG using [rio-cogeo](https://github.com/cogeotiff/rio-cogeo), which can then be visualized using e.g. [rio-viz](https://github.com/developmentseed/rio-viz).
-
 

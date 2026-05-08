@@ -12,14 +12,11 @@ from tilebox.datasets.data import TimeInterval
 from tilebox.storage import CopernicusStorageClient
 from tilebox.workflows import Client as WFClient, Task, ExecutionContext
 from tilebox.workflows.cache import LocalFileSystemCache
-from tilebox.workflows.observability.logging import get_logger
 
 from helpers import (
     polygon_from_poi,
     select_least_cloudy_granules,
 )
-
-logger = get_logger()
 
 
 def s2_dataset() -> TimeseriesDataset:
@@ -68,6 +65,7 @@ class LoadMetadata(Task):
     coords_path: str
 
     def execute(self, context: ExecutionContext):
+        logger = context.logger
         logger.info(f"Loading metadata for {self.start} to {self.end}")
         start = parse(self.start)
         end = parse(self.end)
@@ -126,7 +124,8 @@ class FilterMetadata(Task):
     coords_path: str
 
     def execute(self, context: ExecutionContext):
-        logger.info(f"Filtering metadata")
+        logger = context.logger
+        logger.info("Filtering metadata")
         metadata = pickle.loads(context.job_cache["metadata"])
 
         # Filter the metadata for cloud cover < 5
@@ -139,10 +138,11 @@ class FilterMetadata(Task):
 
 class SelectLeastCloudyGranules(Task):
     def execute(self, context: ExecutionContext):
-        logger.info(f"Selecting least cloudy granules")
+        logger = context.logger
+        logger.info("Selecting least cloudy granules")
         metadata = pickle.loads(context.job_cache["metadata_filtered"])
 
-        filtered = select_least_cloudy_granules(metadata)
+        filtered = select_least_cloudy_granules(metadata, logger)
         logger.info(f"Filtered to {len(filtered.time)} granules")
 
         context.job_cache["best_candidates"] = pickle.dumps(filtered)
@@ -150,7 +150,8 @@ class SelectLeastCloudyGranules(Task):
 
 class DownloadData(Task):
     def execute(self, context: ExecutionContext):
-        logger.info(f"Downloading data")
+        logger = context.logger
+        logger.info("Downloading data")
         filtered = pickle.loads(context.job_cache["best_candidates"])
         storage_client = CopernicusStorageClient(
             os.getenv("COPERNICUS_ACCESS_KEY"),
@@ -164,7 +165,8 @@ class DownloadData(Task):
 
 class ListDownloads(Task):
     def execute(self, context: ExecutionContext):
-        logger.info(f"Listing downloads")
+        logger = context.logger
+        logger.info("Listing downloads")
         metadata = pickle.loads(context.job_cache["best_candidates"])
         for i in range(len(metadata.time)):
             logger.info(f"Would-be downloading granule {i + 1} of {len(metadata.time)}")
@@ -187,7 +189,7 @@ def setup_environment() -> None:
 
 if __name__ == "__main__":
     setup_environment()
-    wfClient = WFClient()
+    wfClient = WFClient(name=os.environ.get("RUNNER_NAME", "download-s2-for-aois"))
 
     # Start a workflow runner right here
     runner = wfClient.runner(

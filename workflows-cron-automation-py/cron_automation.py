@@ -2,24 +2,19 @@ from datetime import timedelta
 import os
 from typing import List
 
-from shapely import MultiPolygon, box
+from shapely import MultiPolygon
 import dotenv
 import xarray as xr
 from tilebox.datasets import Client as DSClient
 from tilebox.datasets.data import TimeInterval
 from tilebox.workflows import Client as WFClient
-from tilebox.workflows.observability.logging import get_logger
 from tilebox.workflows.automations import CronTask
 from tilebox.workflows.data import AutomationPrototype
-
-
-import xarray as xr
 
 # setup environment
 dotenv.load_dotenv()
 dsClient = DSClient()
-wfClient = WFClient()
-logger = get_logger()
+wfClient = WFClient(name=os.environ.get("RUNNER_NAME", "cron-automation"))
 
 
 # aois defines the areas of interest, for which statistics are calculated
@@ -127,6 +122,7 @@ class S2Stats(CronTask):
     duration_hours: int = 24
 
     def execute(self, context):
+        logger = context.logger
         # Specify the time interval to load data for based on the trigger time
         time_interval = TimeInterval(
             end=self.trigger.time,
@@ -172,12 +168,12 @@ def main():
             ["* * * * *"],  # The cron schedule
             max_retries=3,
         )
-        logger.info(f"Created cron automation {cron_automation.name}")
+        print(f"Created cron automation {cron_automation.name}")
     else:
-        logger.info("Cron automation already exists")
+        print("Cron automation already exists")
 
     # Start the workflow runner and wait for incoming tasks
-    logger.info("Starting workflow runner")
+    print("Starting workflow runner")
     wfClient.runner(tasks=[S2Stats]).run_forever()
 
 
