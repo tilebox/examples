@@ -27,12 +27,9 @@ from tilebox.datasets.query import TimeInterval
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.cache import GoogleStorageCache
-from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
-from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
+from tilebox.workflows.observability.logging import configure_console_logging, get_logger
 from zarr.codecs import BloscCodec
 from zarr.storage import ObjectStore as ZarrObjectStore
-
-logger = get_logger()
 
 
 @dataclass(frozen=True)
@@ -65,10 +62,8 @@ def sentinel2_data_store() -> ObjectStore:
     """
     eodata_mounted = Path("/eodata")  # on CloudFerro, the copernicus bucket is mounted as /eodata
     if eodata_mounted.exists():
-        logger.info("Configured local mounted filesystem access to Sentinel-2 archive")
         return LocalStore(eodata_mounted)
 
-    logger.info("Configured remote S3 API access to Sentinel-2 archive")
     # to access the Copernicus S3 bucket directly, generate credentials via
     # https://eodata-s3keysmanager.dataspace.copernicus.eu/ and then add them as a `copernicus-dataspace` profile in
     # ~/.aws/credentials
@@ -112,7 +107,7 @@ class AreaOfInterest:
         target_shape = transform(self.shape, to_target_crs.transform, interleaved=False)  # type: ignore[arg-type]
         return GeoBox.from_bbox(target_shape.bounds, crs=crs, resolution=resolution)
 
-    def chunks(self, crs: str, resolution: int, chunk_size_yx: tuple[int, int]) -> list[Chunk2D]:
+    def chunks(self, crs: str, resolution: int, chunk_size_yx: tuple[int, int]) -> list["Chunk2D"]:
         """Divide the area of interest into chunks of the given size in the target CRS and resolution"""
         geobox = self.as_geobox(crs, resolution)
         root_chunk = Chunk2D(0, geobox.shape.y, 0, geobox.shape.x)
@@ -166,6 +161,7 @@ class Sentinel2ToZarr(Task):
     """The target resolution for our output grid, in units of the target CRS"""
 
     def execute(self, context: ExecutionContext) -> None:
+        logger = context.logger
         dataset = DatasetClient().dataset("open_data.copernicus.sentinel2_msi")
         collection_granules = [
             dataset.collection(collection).query(temporal_extent=self.roi.time, spatial_extent=self.roi.area.shape)
@@ -214,6 +210,7 @@ class InitializeZarrDatacube(Task):
     n_x: int
 
     def execute(self, context: ExecutionContext) -> None:
+        logger = context.logger
         dataset = xr.Dataset()
         encodings = {}
         compressor = BloscCodec(cname="lz4hc", clevel=5, shuffle="shuffle")
@@ -289,9 +286,9 @@ class GranuleProductToZarr(Task):
     def execute(self, context: ExecutionContext) -> None:
         variable_name = Path(self.product_location).stem.split("_")[-2]  # B02, B03, B04 or SCL
         context.current_task.display = f"ProductToZarr({variable_name})"  # type: ignore[attr-defined]
+        logger = context.logger.bind(variable_name=variable_name, product_location=self.product_location)
 
-        tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
-        with tracer.start_span("read_product"):
+        with context.tracer.span("read_product"):
             logger.info(f"Reading product {self.product_location}")
             buffer = bytes(sentinel2_data_store().get(self.product_location).bytes())
             logger.info(f"Product read, size={len(buffer)} bytes")
@@ -300,7 +297,7 @@ class GranuleProductToZarr(Task):
                 arr = product.read(1)
                 src_grid = GeoBox(shape=arr.shape, affine=product.transform, crs=product.crs)
 
-        with tracer.start_span("reproject"):
+        with context.tracer.span("reproject"):
             dataset = xr.Dataset({variable_name: (["y", "x"], arr)})
             dataset[variable_name] = wrap_xr(dataset[variable_name], gbox=src_grid)  # add source spatial_ref metadata
 
@@ -312,7 +309,7 @@ class GranuleProductToZarr(Task):
 
             logger.info(f"Projected variable {variable_name} of product {self.product_location} to target grid")
 
-        with tracer.start_span("write_zarr"):
+        with context.tracer.span("write_zarr"):
             zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
             zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
             target_dataset.to_zarr(
@@ -338,8 +335,6 @@ class ComputeMosaic(Task):
         y_start, y_end, x_start, x_end = self.chunk.y_start, self.chunk.y_end, self.chunk.x_start, self.chunk.x_end
         context.current_task.display = f"ComputeMosaic(y={y_start}:{y_end}, x={x_start}:{x_end})"  # type: ignore[attr-defined]
 
-        tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
-
         zarr_prefix = f"{CACHE_PREFIX}/{context.current_task.job.id}/cube"  # type: ignore[attr-defined]
         zarr_store = ZarrObjectStore(zarr_storage(zarr_prefix))
         cube = xr.open_zarr(zarr_store, zarr_format=3, consolidated=False)
@@ -347,7 +342,7 @@ class ComputeMosaic(Task):
         valid = cube.SCL[:, y_start:y_end, x_start:x_end].isin([2, 4, 5, 6, 11]).compute()
 
         for i, band in enumerate(["B04", "B03", "B02"]):  # red, green, blue
-            with tracer.start_span(f"band_{band}"):
+            with context.tracer.span(f"band_{band}"):
                 has_data = cube[band][:, y_start:y_end, x_start:x_end] != 0
                 mosaic_arr = (
                     cube[band][:, y_start:y_end, x_start:x_end].where(valid & has_data).quantile(0.25, dim="time")
@@ -378,13 +373,10 @@ def main(tasks: Literal["all", "compute-only", "data-only"] = "all", cluster: st
     if Path(".env").exists():
         assert load_dotenv()
 
-    service_name = f"{os.environ['RUNNER_NAME']}-{os.getpid()}"
     configure_console_logging()
-    if os.environ.get("AXIOM_API_KEY"):
-        configure_otel_logging_axiom(service_name)
-        configure_otel_tracing_axiom(service_name)
+    logger = get_logger()
 
-    client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
+    client = WorkflowsClient(name=os.environ.get("RUNNER_NAME", "s2-cloudfree-mosaic"))
 
     cache = GoogleStorageCache(StorageClient(project=ZARR_GCS_PROJECT).bucket(ZARR_GCS_BUCKET), prefix=CACHE_PREFIX)
 

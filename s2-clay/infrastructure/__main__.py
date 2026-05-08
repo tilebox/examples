@@ -20,10 +20,7 @@ git lfs install
 
 cat <<EOF > /etc/profile.d/tilebox-worker.sh
 RUNNER_NAME={hostname}
-AXIOM_API_KEY={axiom_api_key}
 TILEBOX_API_KEY={tilebox_api_key}
-AXIOM_TRACES_DATASET=workflow-traces
-AXIOM_LOGS_DATASET=workflow-logs
 OTC_ACCESS_KEY_ID={otc_access_key_id}
 OTC_SECRET_ACCESS_KEY={otc_secret_access_key}
 COPERNICUS_ACCESS_KEY_ID={copernicus_access_key_id}
@@ -117,7 +114,6 @@ class ComputeInstance(pulumi.ComponentResource):
             hostname=f"s2-clay-{name}",
             tailscale_auth_key=tailscale_config.require_secret("authKey"),
             tilebox_api_key=runner_config.require_secret("tileboxApiKey"),
-            axiom_api_key=runner_config.require_secret("axiomApiKey"),
             otc_access_key_id=runner_config.require_secret("otcAccessKeyId"),
             otc_secret_access_key=runner_config.require_secret("otcSecretAccessKey"),
             copernicus_access_key_id=runner_config.require_secret("copernicusAccessKeyId"),

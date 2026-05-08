@@ -2,17 +2,15 @@ import os
 
 import dotenv
 from tilebox.workflows import Client
-from tilebox.workflows.observability.logging import get_logger
 
 from download_workflow import DownloadWorkflow
 
 dotenv.load_dotenv()
-logger = get_logger()
 
 if os.getenv("TILEBOX_API_KEY") is None:
     raise ValueError("TILEBOX_API_KEY environment variable is not set")
 
-jc = Client().jobs()
+jc = Client(name="download-s2-for-aois-submit").jobs()
 job = jc.submit(
     "download-s2",
     DownloadWorkflow(
@@ -23,4 +21,4 @@ job = jc.submit(
     ),
     max_retries=3,
 )
-logger.info(f"Job submitted with ID {job.id}")
+print(f"Job submitted with ID {job.id}")

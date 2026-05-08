@@ -19,8 +19,7 @@ from odc.geo.geobox import GeoBox
 from sklearn.metrics.pairwise import cosine_distances
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
-from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
-from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
+from tilebox.workflows.observability.logging import configure_console_logging, get_logger
 from torchvision.transforms.v2 import Normalize, Transform
 
 from sentinel2zarr import (
@@ -31,8 +30,6 @@ from sentinel2zarr import (
     RegionOfInterest,
     open_zarr_store,
 )
-
-logger = get_logger()
 
 CLAY_INFERENCE_TILE_SIZE = 256  # input tile size for the model is 256x256 pixels
 CLAY_PATCH_SIZE = 8  # the model computes embeddings for 8x8 patches within each tile
@@ -47,19 +44,15 @@ _CLAY_PLATFORM = "sentinel-2-l2a"
 @lru_cache
 def device() -> torch.device:
     if torch.cuda.is_available():
-        logger.info("CUDA is available, using GPU")
         return torch.device("cuda:0")  # use the GPU if available
     if torch.backends.mps.is_available():
-        logger.info("MPS is available, using Mac GPU")
         return torch.device("mps:0")  # use the GPU if available
-    logger.info("CUDA is not available, falling back to CPU")
     return torch.device("cpu")  # otherwise fall back to CPU
 
 
 @lru_cache
 def clay_model() -> ClayMAEModule:
     """Load the Clay model weights into memory"""
-    logger.info("Loading Clay model weights into memory")
     model = ClayMAEModule.load_from_checkpoint(
         _CLAY_CHECKPOINT,
         model_size="large",
@@ -173,10 +166,10 @@ class ClayInferenceTile(Task):
     output_zarr: tuple[str, str]
 
     def execute(self, context: ExecutionContext) -> None:
-        tracer = context._runner.tracer._tracer  # type: ignore[arg-defined], # noqa: SLF001
         context.current_task.display = f"ClayInferenceTile({self.chunk})"  # type: ignore[attr-defined]
+        logger = context.logger.bind(chunk=str(self.chunk))
 
-        with tracer.start_span("load_data"):
+        with context.tracer.span("load_data"):
             start, end = self.roi.time
             start = datetime.fromisoformat(start)
             end = datetime.fromisoformat(end)
@@ -222,10 +215,10 @@ class ClayInferenceTile(Task):
                 "waves": torch.tensor(wavelengths, device=device()),
             }
 
-        with tracer.start_span("load_model"):
+        with context.tracer.span("load_model"):
             model = clay_model()
 
-        with tracer.start_span("inference"), torch.no_grad():
+        with context.tracer.span("inference"), torch.no_grad():
             unmsk_patch, _, _, _ = model.model.encoder(model_input)
             patches = unmsk_patch.detach().cpu().numpy()[0, 1:, :]
             patches = patches.reshape(  # 32, 32, 1024
@@ -234,7 +227,7 @@ class ClayInferenceTile(Task):
                 CLAY_EMBEDDING_DIM,
             )
 
-        with tracer.start_span("write_output"):
+        with context.tracer.span("write_output"):
             zarr_group_name, zarr_array_name = self.output_zarr
             zarr_group = zarr.open_group(open_zarr_store(zarr_group_name), mode="a")
             zarr_array: zarr.Array = zarr_group[zarr_array_name]  # type: ignore[arg-type]
@@ -332,13 +325,10 @@ def main(cluster: str | None = None, preload_model: bool = False) -> None:
     if Path(".env").exists():
         assert load_dotenv()
 
-    service_name = f"{os.environ['RUNNER_NAME']}-{os.getpid()}"
     configure_console_logging()
-    if os.environ.get("AXIOM_API_KEY"):
-        configure_otel_logging_axiom(service_name)
-        configure_otel_tracing_axiom(service_name)
+    logger = get_logger()
 
-    client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
+    client = WorkflowsClient(name=os.environ.get("RUNNER_NAME", "s2-clay-inference"))
 
     cache_client = boto3.client(
         "s3",

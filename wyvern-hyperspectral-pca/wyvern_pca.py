@@ -16,8 +16,7 @@ from rasterio.windows import Window
 from tilebox.workflows import Client as WorkflowsClient
 from tilebox.workflows import ExecutionContext, Task
 from tilebox.workflows.cache import GoogleStorageCache, LocalFileSystemCache
-from tilebox.workflows.observability.logging import configure_console_logging, configure_otel_logging_axiom, get_logger
-from tilebox.workflows.observability.tracing import configure_otel_tracing_axiom
+from tilebox.workflows.observability.logging import configure_console_logging, get_logger
 from vsifile.rasterio import VSIOpener
 
 from distributed_pca import (
@@ -25,8 +24,6 @@ from distributed_pca import (
     compute_eigenvectors,
     compute_squared_deviations_matrix,
 )
-
-logger = get_logger()
 
 _DEFAULT_SPATIAL_CHUNK_SIZE = 2048
 
@@ -263,6 +260,7 @@ class ComputeLocalStatsForChunk(Task):
 
         duration = time.perf_counter() - before
 
+        logger = context.logger.bind(chunk=str(self.chunk), product_path=self.product_path)
         logger.info(f"Read chunk {self.chunk} from {Path(self.product_path).name} in {duration:.2f}s")
 
         # convert the 3D array of shape (y, x, bands) to a feature array of shape (N, bands)
@@ -354,8 +352,6 @@ def get_cache(cache_bucket: str | None = None) -> GoogleStorageCache | LocalFile
     if not cache_bucket.startswith("gs://"):
         raise ValueError("Expected a google storage bucket URL, but got {cache_bucket}")
 
-    logger.info(f"Using a google storage cache bucket: {cache_bucket}")
-
     parts = cache_bucket.removeprefix("gs://").split("/", 1)
     bucket = parts[0]
     prefix = parts[1] if len(parts) > 1 else ""
@@ -371,13 +367,10 @@ def main(
     if Path(".env").exists():
         assert load_dotenv()
 
-    service_name = f"{os.environ['RUNNER_NAME']}-{os.getpid()}"
     configure_console_logging()
-    if os.environ.get("AXIOM_API_KEY"):
-        configure_otel_logging_axiom(service_name)
-        configure_otel_tracing_axiom(service_name)
+    logger = get_logger()
 
-    client = WorkflowsClient()  # a workflow client for https://api.tilebox.com
+    client = WorkflowsClient(name=os.environ.get("RUNNER_NAME", "wyvern-hyperspectral-pca"))
 
     tasks = [
         WyvernPCA,
