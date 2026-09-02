@@ -12,10 +12,25 @@ import (
 )
 
 type ScheduleImageCapture struct {
-	// json tags must match the Python task definition
-	Location      [2]float64 `json:"location"` // lat_lon
-	ResolutionM   int        `json:"resolution_m"`
-	SpectralBands []float64  `json:"spectral_bands"` // spectral bands in nm
+	Location      Geometry   `json:"location"`
+	Resolution    Resolution `json:"resolution"`
+	SpectralBands []float64  `json:"spectral_bands"`
+}
+
+// Geometry and Resolution match Tilebox's ODC Geo task serialization.
+type Geometry struct {
+	Geometry GeoJSONPoint `json:"geometry"`
+	CRS      string       `json:"crs"`
+}
+
+type GeoJSONPoint struct {
+	Type        string     `json:"type"`
+	Coordinates [2]float64 `json:"coordinates"`
+}
+
+type Resolution struct {
+	X float64 `json:"x"`
+	Y float64 `json:"y"`
 }
 
 // No need to define the Execute method since we're only submitting the task
@@ -53,7 +68,7 @@ func submitHandler(client *workflows.Client) http.HandlerFunc {
 			return
 		}
 
-		resolutionM, err := strconv.Atoi(resolutionArg)
+		resolutionM, err := strconv.ParseFloat(resolutionArg, 64)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusBadRequest)
 			return
@@ -72,8 +87,11 @@ func submitHandler(client *workflows.Client) http.HandlerFunc {
 		job, err := client.Jobs.Submit(r.Context(), "Schedule Image capture",
 			[]workflows.Task{
 				&ScheduleImageCapture{
-					Location:      [2]float64{latFloat, lonFloat},
-					ResolutionM:   resolutionM,
+					Location: Geometry{
+						Geometry: GeoJSONPoint{Type: "Point", Coordinates: [2]float64{lonFloat, latFloat}},
+						CRS:      "EPSG:4326",
+					},
+					Resolution:    Resolution{X: resolutionM, Y: -resolutionM},
 					SpectralBands: spectralBands,
 				},
 			},

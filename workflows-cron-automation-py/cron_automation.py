@@ -1,27 +1,15 @@
-from datetime import timedelta
-import os
-from typing import List
-
-from shapely import MultiPolygon
 import dotenv
-import xarray as xr
-from tilebox.datasets import Client as DSClient
-from tilebox.datasets.data import TimeInterval
-from tilebox.workflows import Client as WFClient
-from tilebox.workflows.automations import CronTask
-from tilebox.workflows.data import AutomationPrototype
+import shapely
+from shapely import MultiPolygon
+from tilebox.workflows import Client
 
-# setup environment
-dotenv.load_dotenv()
-dsClient = DSClient()
-wfClient = WFClient(name=os.environ.get("RUNNER_NAME", "cron-automation"))
-
+from s2_stats import S2Stats
 
 # aois defines the areas of interest, for which statistics are calculated
 # Polygons created using Tilebox Console:
 # - [Switzerland](https://console.tilebox.com/datasets/explorer/34d7b08b-8a27-4b40-819b-b11c6189695a?collectionId=5dea4d16-30f3-4f14-b713-8995fec173e8&view=explorer&polygons=AQETqQKXEjYCCxJMAv0RkQIaEsYC2BEpA%2BQRQwMWEoQD3BGuAxYSDAQCEg4EIxIiBCoSKARhEvQDXBLQA24S4AOMElQDuhI8A6cSqQKXEg==)
 # - [USA](https://console.tilebox.com/datasets/explorer/34d7b08b-8a27-4b40-819b-b11c6189695a?collectionId=5dea4d16-30f3-4f14-b713-8995fec173e8&view=explorer&polygons=AwETwc4aE8/OjQ%2Bc0VoMOtb/C2HakAl82qMKyt5eC0zgbAkg4XgJtuC7C3riUA1c44kOu%2BYsEaTl9xK54w0SqeBlESveCBOk2pMTwc4aEwEHG8SrB9bClwh%2BwfQIwMBZCPbBBggFwyAHG8SrBwEJksnUFnbJmhuRwh8cv70QG0G%2BNBfGwDsWb7mEFCm6ZBOSydQW)
-aois = {
+AREAS: dict[str, shapely.Geometry] = {
     "Switzerland": MultiPolygon(
         [
             (
@@ -103,78 +91,21 @@ aois = {
 }
 
 
-def load_data_for_aoi(aoi: MultiPolygon, time_interval: TimeInterval) -> xr.Dataset:
-    """Loads Sentinel 2 data for the specified AOI and time interval"""
-
-    ds = dsClient.dataset("open_data.copernicus.sentinel2_msi")
-    s2a = ds.collection("S2A_S2MSI2A").query(temporal_extent=time_interval, spatial_extent=aoi)
-    s2b = ds.collection("S2B_S2MSI2A").query(temporal_extent=time_interval, spatial_extent=aoi)
-    s2c = ds.collection("S2C_S2MSI2A").query(temporal_extent=time_interval, spatial_extent=aoi)
-
-    non_empty = [ds for ds in (s2a, s2b, s2c) if ds]  # filter out empty datasets
-    data = xr.concat(non_empty, dim="time") if non_empty else None
-
-    return data
-
-
-# S2Stats prints statistics of Sentinel 2 tasks of a configurable preceding time
-class S2Stats(CronTask):
-    duration_hours: int = 24
-
-    def execute(self, context):
-        logger = context.logger
-        # Specify the time interval to load data for based on the trigger time
-        time_interval = TimeInterval(
-            end=self.trigger.time,
-            start=self.trigger.time - timedelta(hours=self.duration_hours),
-        )
-
-        # Print statistics for each AOI
-        logger.info(f"Stats for {self.duration_hours}h preceding {self.trigger.time}:")
-        for name, aoi in aois.items():
-            # Query the data for the AOI
-            data = load_data_for_aoi(aoi, time_interval)
-
-            # filtered = filter_for_aoi(aoi, data)
-
-            logger.info(f" {name}:")
-            if data:
-                logger.info(f"  Number of granules: {len(data.time)}")
-                logger.info(
-                    f" Average cloudiness: {data.cloud_cover.mean(dim='time').values:.2f}%"
-                )
-            else:
-                logger.info(" No data found")
-
-    @staticmethod
-    def identifier() -> tuple[str, str]:
-        return "tilebox.com/example/S2Stats", "v1.0"
-
-
-# automation_exists checks if an automation with the given display name is already registered within Tilebox
-def automation_exists(name: str, automations: List[AutomationPrototype]) -> bool:
-    return any(automation.name == name for automation in automations)
-
-
-def main():
-    # Create the automation if it doesn't exist, this can be done on
-    automations = wfClient.automations()
-    if not automation_exists("s2-stats-automation", automations.all()):
-        cron_automation = automations.create_cron_automation(
-            "s2-stats-automation",  # name of the cron automation
-            S2Stats(
-                duration_hours=24
-            ),  # the task (and its input parameters) to run repeatedly
-            ["* * * * *"],  # The cron schedule
-            max_retries=3,
-        )
-        print(f"Created cron automation {cron_automation.name}")
-    else:
+def main() -> None:
+    dotenv.load_dotenv()
+    automations = Client().automations()
+    name = "s2-stats-automation"
+    if any(automation.name == name for automation in automations.all()):
         print("Cron automation already exists")
+        return
 
-    # Start the workflow runner and wait for incoming tasks
-    print("Starting workflow runner")
-    wfClient.runner(tasks=[S2Stats]).run_forever()
+    automation = automations.create_cron_automation(
+        name,
+        S2Stats(areas=AREAS),
+        "* * * * *",
+        max_retries=3,
+    )
+    print(f"Created cron automation {automation.name}")
 
 
 if __name__ == "__main__":

@@ -5,13 +5,13 @@ description = "A workflow for performing PCA on wyvern hyperspectral data in a d
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
-    "cyclopts>=3.19.0",
+    "google-cloud-storage>=3.1.0",
     "numpy>=2.3.0",
-    "odc-geo>=0.4.10",
-    "python-dotenv>=1.1.1",
+    "odc-geo>=0.5.0",
     "rasterio>=1.4.3",
-    "rio-cogeo>=5.4.2",
-    "tilebox-workflows>=0.37.1",
+    "tilebox-datasets>=0.59.0",
+    "tilebox-grpc>=0.59.0",
+    "tilebox-workflows[geospatial]>=0.59.0",
     "vsifile@git+https://github.com/vincentsarago/vsifile.git@main",
 ]
 
@@ -21,7 +21,7 @@ dev = ["pyright>=1.1.401", "ruff>=0.12.0"]
 [tool.ruff]
 # settings applying to all ruff subcommands, such as `ruff check` (lint) and `ruff format`
 line-length = 120
-target-version = "py310"
+target-version = "py313"
 exclude = [".venv", ".ipynb_checkpoints", "*.ipynb"]
 
 [tool.ruff.lint]
@@ -45,7 +45,6 @@ ignore = [
     "PLR2004", # magic-value-comparison: sometimes comparison with constants (e.g. 0) makes sense
     "TRY003",  # raise-vanilla-args: exceptions like this make sense in python
     "TRY400",  # error-instead-of-exception: logger.error is ok with loguru
-    "S301",    # suspicious-pickle-usage: we use it for caching
     # disabled because of formatter
     "E501",   # line-too-long -> formatter takes care of this
     "ISC001", # single-line-implicit-str-concatenation -> formatter takes care of this

@@ -1,0 +1,16 @@
+[workflow]
+slug = "wyvern-hyperspectral-pca"
+root = "."
+runner = "runner:runner"
+
+[build]
+include = [
+    "tilebox.workflow.toml",
+    "pyproject.toml",
+    "uv.lock",
+    "runner.py",
+    "distributed_pca.py",
+    "hyperspectral_pca/**",
+]
+exclude = ["**/__pycache__/**", "**/*.pyc"]
+use_gitignore = true
