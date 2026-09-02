@@ -1,27 +1,22 @@
-from tilebox.workflows import ExecutionContext, Task, Client
+from odc.geo import Geometry, Resolution
+from tilebox.workflows import ExecutionContext, Runner, Task
 
 
 class ScheduleImageCapture(Task):
-    # The input parameters must match the ones defined in the Go task
-    location: tuple[float, float]  # lat_lon
-    resolution_m: int
-    spectral_bands: list[float]  # spectral bands in nm
+    location: Geometry
+    resolution: Resolution
+    spectral_bands: list[float]
 
-    def execute(self, context: ExecutionContext) -> None:
-        # Here you can implement your task logic, submit subtasks, etc.
-        print(f"Image captured for {self.location} with {self.resolution_m}m resolution and bands {self.spectral_bands}")
+    async def execute(self, context: ExecutionContext) -> None:
+        longitude, latitude = self.location.geom.coords[0]
+        context.logger.info(
+            f"Image captured at {latitude}, {longitude} with {abs(self.resolution.x)}m resolution "
+            f"and bands {self.spectral_bands}"
+        )
 
     @staticmethod
     def identifier() -> tuple[str, str]:
-        # The identifier must match the one defined in the Go task
         return "tilebox.com/schedule_image_capture", "v1.0"
 
 
-def main():
-    client = Client()
-    runner = client.runner(tasks=[ScheduleImageCapture])
-    runner.run_forever()
-
-
-if __name__ == "__main__":
-    main()
+runner = Runner(tasks=[ScheduleImageCapture])

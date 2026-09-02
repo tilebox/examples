@@ -23,8 +23,6 @@ RUNNER_NAME={hostname}
 TILEBOX_API_KEY={tilebox_api_key}
 OTC_ACCESS_KEY_ID={otc_access_key_id}
 OTC_SECRET_ACCESS_KEY={otc_secret_access_key}
-COPERNICUS_ACCESS_KEY_ID={copernicus_access_key_id}
-COPERNICUS_SECRET_ACCESS_KEY={copernicus_secret_access_key}
 EOF
 
 # Make sure it is executable
@@ -116,8 +114,6 @@ class ComputeInstance(pulumi.ComponentResource):
             tilebox_api_key=runner_config.require_secret("tileboxApiKey"),
             otc_access_key_id=runner_config.require_secret("otcAccessKeyId"),
             otc_secret_access_key=runner_config.require_secret("otcSecretAccessKey"),
-            copernicus_access_key_id=runner_config.require_secret("copernicusAccessKeyId"),
-            copernicus_secret_access_key=runner_config.require_secret("copernicusSecresAccessKey"),
         )
 
         self.instance = otc.ComputeInstanceV2(

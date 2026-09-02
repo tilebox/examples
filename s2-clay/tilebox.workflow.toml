@@ -1,0 +1,15 @@
+[workflow]
+slug = "sentinel-2-clay-change-detection"
+root = "."
+runner = "runner:runner"
+
+[build]
+include = [
+    "tilebox.workflow.toml",
+    "pyproject.toml",
+    "uv.lock",
+    "runner.py",
+    "configs/metadata.yaml",
+    "s2_clay/**",
+]
+use_gitignore = true

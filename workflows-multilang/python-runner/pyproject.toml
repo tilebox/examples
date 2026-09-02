@@ -3,7 +3,25 @@ name = "multilang-tasking-runner-py"
 version = "0.1.0"
 description = "Tilebox Multilang Tasking Runner, Python"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 dependencies = [
-    "tilebox-workflows>=0.36.0",
+    "odc-geo>=0.5.0",
+    "tilebox-datasets>=0.59.0",
+    "tilebox-grpc>=0.59.0",
+    "tilebox-workflows[geospatial]>=0.59.0",
 ]
+
+[dependency-groups]
+dev = ["pyright>=1.1.409", "ruff>=0.15.0"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["ALL"]
+ignore = ["COM", "CPY", "D", "G004", "ISC001"]
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

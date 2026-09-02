@@ -1,6 +1,6 @@
 # Sentinel-2 Cloudfree Mosaic Workflow
 
-This workflow reads Sentinel-2 data from the Copernicus archive, and writes a cloudfree mosaic to a Zarr datacube.
+This workflow queries credentials-free Sentinel-2 L2A COGs from AWS Earth Search and writes a cloud-free RGB mosaic to Zarr.
 
 <p align="center">
   <a href="https://examples.tilebox.com/sentinel2_mosaic"><img src="ireland.png"></a>
@@ -14,64 +14,77 @@ This workflow reads Sentinel-2 data from the Copernicus archive, and writes a cl
 
 1. Shared bucket
 
-Since this workflow can be run in a distributed manner, the output dataset is written into a shared `S3` bucket.
-To set this up, create an `S3` bucket, and set the `ZARR_S3_BUCKET` and `ZARR_S3_BUCKET_REGION` variable in
-`sentinel2zarr.py` to the name and region of the bucket you want to use.
+Since this workflow can be run in a distributed manner, the output dataset and workflow cache are written into a shared bucket.
+This example is configured for GCS; set the `ZARR_GCS_BUCKET` and `ZARR_GCS_PROJECT` constants in
+`s2_cloudfree_mosaic/tasks.py` to the bucket and project you want to use.
 
 > [!TIP]  
-> You can also use a GCS bucket instead, check out our [docs](https://docs.tilebox.com/workflows/caches#google-storage-cache) for more information. Or if you only run tasks on a single machine, you can use a local filesystem too.
+> If you only run tasks on a single machine, you can use a local filesystem cache instead.
 
-2. Access to the Copernicus archive
+### Building and running the workflow
 
-To access the Copernicus archive, you need to register at [Copernicus Dataspace](https://dataspace.copernicus.eu) and generate credentials
-for their S3 interface using [their S3 key manager](https://eodata-s3keysmanager.dataspace.copernicus.eu/panel/s3-credentials).
+This example is structured as a Tilebox workflow release project:
 
-Then configure it on your machine by adding a `copernicus-dataspace` profile to your `~/.aws/credentials` file.
-
-```
-[copernicus-dataspace]
-endpoint_url=https://eodata.dataspace.copernicus.eu
-aws_access_key_id=N...
-aws_secret_access_key=j...
-```
-
-
-### Starting a runner
+- `tilebox.workflow.toml` configures the release build and points at `runner:runner`
+- `runner.py` exports the reusable `Runner` definition
+- `s2_cloudfree_mosaic/tasks.py` contains the workflow tasks
 
 1. Copy `.env.example` to `.env`
     - set a `TILEBOX_API_KEY` which you generate via the [Tilebox console](https://console.tilebox.com)
-    - set a proper `RUNNER_NAME` to identify this machine in logs and traces
     - logs and traces are exported to Tilebox automatically by the workflow client
 
-2. Start a runner
+2. Validate the release artifact
 
 ```
-uv run sentinel2zarr.py
+tilebox workflow build-release --debug --json
 ```
 
-> [!TIP]
-> You can easily start multiple runners on one machine in parallel using [call-in-parallel](https://github.com/tilebox/call-in-parallel): `call-in-parallel -n 4 -- uv run sentinel2zarr.py`
+3. Publish and deploy the release to a cluster
+
+```
+tilebox workflow publish-release --json
+tilebox workflow deploy-release --latest --cluster <cluster-slug> --json
+```
+
+4. Start a release runner for that cluster
+
+```
+tilebox runner start --cluster <cluster-slug>
+```
+
+For local direct-runner iteration, you can still run the same `Runner` object through the compatibility entrypoint:
+
+```
+uv run sentinel2zarr.py --cluster <cluster-slug>
+```
 
 ### Submitting a job
 
-The runners will idle until you submit a job. To submit a job, use the `WorkflowsClient` from `tilebox-workflows`:
+The release runner will idle until you submit a job. To submit a job, use the `Client` from `tilebox.workflows`:
 
 ```python
-from tilebox_workflows import Client
-from sentinel2zarr import Sentinel2ToZarr, RegionOfInterest, AreaOfInterest
+from datetime import UTC, datetime
 
-aoi = AreaOfInterest(16.15, 48.05, 16.65, 48.37)  # Vienna, Austria
-time_interval = ("2025-05-05", "2025-05-12")  # First week of May 2025
+from odc.geo import CRS, Geometry, Resolution
+from shapely import box
+from tilebox.datasets.query import TimeInterval
+from tilebox.workflows import Client
+
+from s2_cloudfree_mosaic import BuildMosaic
+
+aoi = Geometry(box(16.15, 48.05, 16.65, 48.37), "EPSG:4326")  # Vienna, Austria
+time_interval = TimeInterval(datetime(2025, 5, 5, tzinfo=UTC), datetime(2025, 5, 12, tzinfo=UTC))
 
 
 client = Client()
 client.jobs().submit(
     "s2-vienna-weekly-mosaic",
-    Sentinel2ToZarr(
-        collections=["S2A_S2MSI2A", "S2C_S2MSI2A", "S2C_S2MSI2A"],
-        roi=RegionOfInterest(aoi, time_interval),
-        crs="EPSG:3857",
-        resolution=10
+    BuildMosaic(
+        area=aoi,
+        time_interval=time_interval,
+        output_crs=CRS("EPSG:3857"),
+        resolution=Resolution(x=10, y=-10),
+        max_cloud_cover=20,
     ),
 )
 ```
@@ -82,23 +95,14 @@ Head over to the [Jobs](https://console.tilebox.com/workflows/jobs) page in the 
 
 ## Workflow Architecture
 
-The workflow consists of three steps:
+The workflow consists of two steps:
 
-1. Locating all granules that intersect with the given spatial and temporal region of interest
-    - Knowing that, we can already determine the shape of the output datacube, since every granule corresponds to
-      one time layer in our Zarr cube.
-    - Therefore at this point we already initialize an empty cube with the proper dimensions.
-2. Reading all granules into the Zarr cube
-    - For each granule, we read the 10m bands B02 (blue), B03 (green), B04 (red) and 20m SCL (scene classification layer)
-    - We reproject each product to the target `CRS` and resolution
-    - And finally write it to the Zarr cube to the corresponding time layer
-    - This is done in parallel for all granules and each product in case there are multiple task runners available
-3. Computing the cloudfree mosaic
-    - For each spatial chunk in the Zarr cube, we compute the cloudfree mosaic across the time dimension
-    - By applying the [SCL layer as cloud mask](https://sentiwiki.copernicus.eu/web/s2-processing#S2Processing-ClassificationMaskGeneration), and then computing the [25% quantile among the remaining valid observations](https://documentation.dataspace.copernicus.eu/Data/SentinelMissions/Sentinel2.html#sentinel-2-level-3-quarterly-mosaics)
+1. `BuildMosaic` queries the `open_data.aws_earth.sentinel2` dataset with spatial, temporal, collection, and cloud-cover filters. It builds an exact ODC `GeoBox`, divides it with `GeoboxTiles`, initializes the output, and submits one task per tile.
+2. Each `ComputeMosaicTile` task opens only the intersecting COG windows for `red`, `green`, `blue`, and `scl`, reprojects them to its output tile, applies the SCL mask, computes the 25th percentile, and writes its disjoint Zarr region.
+
+No full Sentinel-2 product is downloaded and no intermediate time-series cube is written.
 
 
 ## Visualization
 
 Interactively visualizing the mosaic from Zarr directly isn't well supported yet, therefore as a final post-processing step we convert the Zarr mosaic to a `GeoTIFF` using `rasterio` and then to a COG using [rio-cogeo](https://github.com/cogeotiff/rio-cogeo), which can then be visualized using e.g. [rio-viz](https://github.com/developmentseed/rio-viz).
-

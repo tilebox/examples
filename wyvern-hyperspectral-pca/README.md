@@ -6,7 +6,8 @@ As an example we use [Wyvern Open Data](https://wyvern.space/open-data), which i
 
 ## The Algorithm
 
-This parallel Principal Component Analysis (PCA) algorithm leverages an incremental approach, where the dataset is divided into smaller chunks, and statistics from these chunks are aggregated in a tree-like structure. This allows for efficient parallel computation of the overall PCA.
+This parallel Principal Component Analysis (PCA) algorithm divides every product into native ODC `GeoboxTiles`,
+computes local statistics in parallel, and aggregates them through a bounded 16-way reduction tree.
 
 The core idea is based on the following steps:
 
@@ -25,26 +26,26 @@ The core idea is based on the following steps:
 
 3.  **Eigen-decomposition**: Once all local statistics have been combined to yield a single, global sum of squared deviations matrix and mean vector for the entire dataset, the final step involves computing the eigenvalues and eigenvectors of the global covariance matrix (which can be derived directly from the global sum of squared deviations matrix and the total number of samples).
 
-## Starting task runners
+## Run the workflow
 
 Install dependencies:
 
 ```bash
-uv sync -U
+uv sync
 ```
-
-Start a runner:
-
-> [!TIP]  
-> We recommend using [call-in-parallel](https://github.com/tilebox/call-in-parallel) to easily start multiple runners in parallel.
 
 ```bash
-call-in-parallel -n 4 -- uv run wyvern_pca.py
+tilebox workflow build-release --debug --json
+tilebox workflow publish-release --json
+tilebox workflow deploy-release --latest --cluster <cluster-slug> --json
+tilebox runner start --cluster <cluster-slug>
 ```
 
+Set `CACHE_BUCKET=gs://<bucket>/<prefix>` on distributed runners so chunk statistics are shared. If it is unset, the
+runner uses a local filesystem cache for single-machine development.
 
-The workflow accepts a path to a wyvern product that is either already downloaded locally, or a URI to the full product
-in the S3 bucket. In the latter case, the workflow will utilize [https://filesystem-spec.readthedocs.io/en/latest/](fsspec) to access the data directly from S3. However, unless the runners are co-located in the same region as the S3 bucket (e.g. the runners are `EC2` instances), this will be pretty slow.
+The workflow accepts a local Wyvern product path or an S3 URI. Remote products are window-read through Rasterio and
+`vsifile`; runners outside the bucket region will be slower.
 
 ### Running against local data using multiple cores
 
@@ -54,13 +55,23 @@ Download the wyvern product you want to perform `PCA` on using the [aws cli](htt
 aws s3 cp s3://wyvern-prod-public-open-data-program/wyvern_dragonette-001_20240703T171837_4c406dd3/wyvern_dragonette-001_20240703T171837_4c406dd3.tiff .
 ```
 
-Now start as many runners as you want to utilize to perform `PCA` on the data in parallel.
+Now submit a job to the workflow to compute the `PCA` for the product.
 
-> [!TIP]  
-> We recommend using [call-in-parallel](https://github.com/tilebox/call-in-parallel) to easily start multiple runners in parallel.
+```python
+from tilebox.workflows import Client
 
-```bash
-call-in-parallel -n 4 -- uv run wyvern_pca.py
+from hyperspectral_pca import WyvernPCA
+
+client = Client()
+client.jobs().submit(
+    "wyvern-pca",
+    WyvernPCA(
+        product_paths=[
+            "s3://wyvern-prod-public-open-data-program/wyvern_dragonette-001_20240703T171837_4c406dd3/wyvern_dragonette-001_20240703T171837_4c406dd3.tiff"
+        ]
+    ),
+)
 ```
 
-Now submit a job to the workflow to compute the `PCA` for the product.
+The final task stores a compressed NumPy archive under `principal_components` in the job cache. It contains sorted
+`eigenvalues` and corresponding `eigenvectors`. Intermediate statistics use the same non-pickle archive format.

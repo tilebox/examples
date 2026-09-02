@@ -1,0 +1,9 @@
+[workflow]
+slug = "multi-language-image-capture"
+root = "."
+runner = "runner:runner"
+
+[build]
+include = ["tilebox.workflow.toml", "pyproject.toml", "uv.lock", "runner.py"]
+exclude = ["**/__pycache__/**", "**/*.pyc"]
+use_gitignore = true

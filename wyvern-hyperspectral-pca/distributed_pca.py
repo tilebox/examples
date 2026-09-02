@@ -1,13 +1,11 @@
-from typing import TypeAlias
-
 import numpy as np
 
-NSamples: TypeAlias = int
-NBands: TypeAlias = int
+type NSamples = int
+type NBands = int
 
-Samples: TypeAlias = np.ndarray[tuple[NSamples, NBands]]
-BandsVector: TypeAlias = np.ndarray[tuple[NBands], np.dtype[np.floating]]
-BandsMatrix: TypeAlias = np.ndarray[tuple[NBands, NBands], np.dtype[np.floating]]
+type Samples = np.ndarray[tuple[NSamples, NBands]]
+type BandsVector = np.ndarray[tuple[NBands], np.dtype[np.floating]]
+type BandsMatrix = np.ndarray[tuple[NBands, NBands], np.dtype[np.floating]]
 
 
 def compute_covariance_matrix(data: Samples) -> BandsMatrix:
@@ -87,9 +85,9 @@ def compute_eigenvectors(covariance_matrix: BandsMatrix) -> tuple[BandsVector, B
         tuple: A tuple containing eigenvalues (np.ndarray of shape (n_bands,)) and eigenvectors
             (np.ndarray of shape (n_bands, n_bands))
     """
-    eigenvalues, eigenvectors = np.linalg.eig(covariance_matrix)
+    eigenvalues, eigenvectors = np.linalg.eigh(covariance_matrix)
     # sort our eigenvalues and eigenvectors by decreasing eigenvalue
     sorted_by_desc_eigenvalues = np.argsort(eigenvalues)[::-1]
-    eigenvalues[sorted_by_desc_eigenvalues]
+    eigenvalues = eigenvalues[sorted_by_desc_eigenvalues]
     eigenvectors = eigenvectors[:, sorted_by_desc_eigenvalues]
     return eigenvalues, eigenvectors

@@ -1,30 +1,23 @@
 [project]
 name = "workflows-sentinel2-clay"
 version = "0.1.0"
-description = "Tilebox example workflow for converting Sentinel-2 data to Zarr format"
+description = "Tilebox workflow for Clay-based Sentinel-2 change detection"
 readme = "README.md"
 requires-python = ">=3.12, <3.13"
 dependencies = [
+    "affine>=2.4.0",
     "claymodel",
-    "cyclopts>=3.18.0",
-    "dask>=2025.5.1",
-    "dotenv>=0.9.9",
-    "morecantile>=6.2.0",
+    "huggingface-hub>=0.34.0",
     "numpy>=2",
     "obstore>=0.6.0",
-    "odc-geo>=0.4.10",
-    "pyproj>=3.7.1",
-    "pystac-client>=0.9.0",
-    "python-box>=7.3.2",
+    "odc-geo>=0.5.0",
     "rasterio>=1.4.3",
-    "scikit-learn>=1.8.0",
-    "stackstac>=0.5.1",
-    "tilebox-datasets>=0.35.0",
-    "tilebox-workflows>=0.35.0",
-    "xarray>=2025.4.0",
-    "zarr>=3.1.0",
+    "tilebox-datasets>=0.59.0",
+    "tilebox-grpc>=0.59.0",
+    "tilebox-storage>=0.59.0",
+    "tilebox-workflows[geospatial]>=0.59.0",
     "torch>=2.8.0",
-    "torchvision>=0.23.0",
+    "zarr>=3.1.0",
 ]
 
 [dependency-groups]
@@ -33,7 +26,7 @@ dev = ["pyright>=1.1.401", "ruff>=0.11.11"]
 [tool.ruff]
 # settings applying to all ruff subcommands, such as `ruff check` (lint) and `ruff format`
 line-length = 120
-target-version = "py310"
+target-version = "py312"
 exclude = [
     "*/.venv/*",
 ]
@@ -76,6 +69,8 @@ unfixable = [
 # we can make sure of this by telling it to use the uv venv
 venvPath = "."
 venv = ".venv"
+exclude = ["infrastructure"]
+reportPrivateImportUsage = false
 
 [tool.uv.sources]
 claymodel = { git = "https://github.com/Clay-foundation/model.git" }

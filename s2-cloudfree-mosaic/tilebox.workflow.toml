@@ -1,0 +1,14 @@
+[workflow]
+slug = "sentinel-2-cloudfree-mosaic-F8yVcPRfw2AkoZ"
+root = "."
+runner = "runner:runner"
+
+[build]
+include = [
+    "tilebox.workflow.toml",
+    "pyproject.toml",
+    "uv.lock",
+    "runner.py",
+    "**/*.py",
+]
+use_gitignore = true

@@ -1,0 +1,15 @@
+[workflow]
+slug = "sentinel-2-stats-cron-automation"
+root = "."
+runner = "runner:runner"
+
+[build]
+include = [
+    "tilebox.workflow.toml",
+    "pyproject.toml",
+    "uv.lock",
+    "runner.py",
+    "s2_stats/**",
+]
+exclude = ["**/__pycache__/**", "**/*.pyc"]
+use_gitignore = true
