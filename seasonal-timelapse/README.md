@@ -1,8 +1,12 @@
 # Seasonal RGB Timelapse
 
-This introductory Tilebox workflow builds an animated WebP from Sentinel-2 imagery. It
-demonstrates the core workflow pattern: a root task plans the work, independent
-tasks run in parallel, and a final task waits for their outputs.
+This is the workflow behind the [Tilebox Console quickstart](https://console.tilebox.com/home/quickstart). It turns seasonal Sentinel-2 scenes around a location into an animated WebP while showing how Tilebox plans a job, runs independent tasks in parallel, and tracks the execution.
+
+Start with the quickstart if you want to see the workflow run. It submits the job for a location you choose and guides you through connecting your machine to run tasks. Come back here when you want to understand the code or adapt it for your own workflow.
+
+## How the workflow runs
+
+The workflow uses three task types:
 
 ```text
 BuildSeasonalTimelapse
@@ -10,117 +14,99 @@ BuildSeasonalTimelapse
   └── AssembleTimelapse (waits for every frame)
 ```
 
-The workflow queries Sentinel-2 once for the complete time range, keeps scenes
-that fully cover the requested square, and uses xarray to select the scene with
-the lowest reported cloud percentage in each three-month period. Periods
-without a matching scene are skipped. The workflow fails only when no scenes
-are available.
+`BuildSeasonalTimelapse` is the root task. It creates a square area around the requested coordinates, queries `open_data.aws_earth.sentinel2`, and keeps scenes that cover the full area and meet the cloud-cover limit. It then selects the scene with the lowest reported cloud percentage in each three-month period.
 
-The periods are written as explicit month ranges—`December–February`,
-`March–May`, `June–August`, and `September–November`—rather than unexplained
-DJF/MAM/JJA/SON codes or hemisphere-specific season names.
+Each selected scene becomes an independent `RenderSeasonalFrame` task. Tilebox can distribute these tasks across the available runners, so multiple frames render at the same time. Once every frame finishes, `AssembleTimelapse` combines the ordered PNG files into the final animation.
 
-## What this example teaches
+## Code walkthrough
 
-- A `Task` declares typed, serializable job inputs.
-- A root task can query a Tilebox dataset, process its xarray result, and submit
-  dynamic subtasks.
-- Independent frame tasks can run concurrently.
-- `depends_on` creates a barrier before animation assembly.
-- Task displays, progress, logs, retries, and tracing make work observable.
-- Native values such as `datetime`, `UUID`, and Shapely geometry can cross task
-  boundaries directly.
+### Define the job inputs
 
-## Job inputs
+The root task in [`seasonal_rgb_timelapse/tasks.py`](seasonal_rgb_timelapse/tasks.py) declares typed inputs and a stable identifier:
+
+```python
+class BuildSeasonalTimelapse(Task):
+    center_lat_lon: tuple[float, float]
+    square_width_km: float
+    time_range: tuple[datetime, datetime] | None = None
+    max_cloud_percent: float = 20.0
+
+    @staticmethod
+    def identifier() -> tuple[str, str]:
+        return "tilebox.com/seasonal-rgb-timelapse/BuildSeasonalTimelapse", "v1.0"
+```
+
+The quickstart provides `center_lat_lon` and sets `square_width_km` to 10. When no time range is supplied, the workflow uses the three years ending at the next UTC midnight.
+
+### Query Tilebox Open Data
+
+The root task uses the Tilebox dataset client to find low-cloud Sentinel-2 L2A scenes for the requested area and time range:
+
+```python
+collection = Client().dataset(DATASET).collection(COLLECTION)
+scenes = collection.query(
+    temporal_extent=TimeInterval(start=start, end=end),
+    spatial_extent=aoi,
+    filter=field("cloud_cover") <= self.max_cloud_percent,
+)
+```
+
+The result is an xarray dataset. The task filters out scenes that do not cover the complete square, groups the remaining scenes into three-month periods, and chooses the lowest-cloud scene from each group.
+
+### Create parallel work
+
+The root task creates one frame task per selected scene and submits them together:
+
+```python
+frames = context.submit_subtasks(frame_tasks, max_retries=1)
+context.submit_subtask(
+    AssembleTimelapse(output_name=output_name),
+    depends_on=frames,
+    max_retries=1,
+)
+```
+
+`submit_subtasks` makes the frame tasks available for parallel execution. `depends_on` prevents the assembly task from starting until every frame is ready. The tasks update job progress and emit structured logs and tracing spans. Each submitted task allows one retry.
+
+### Read and render imagery
+
+[`seasonal_rgb_timelapse/imagery.py`](seasonal_rgb_timelapse/imagery.py) opens each scene's visual GeoTIFF through Tilebox Storage and reads only the window needed for the area. It crops the result to a square PNG and applies one fixed display curve to every frame, which avoids visible brightness changes caused by per-frame autocontrast.
+
+`AssembleTimelapse` sorts the frame filenames chronologically and encodes them as a looping animated WebP. [`runner.py`](runner.py) registers all three task types so a Tilebox runner can execute them.
+
+## Inputs
 
 `BuildSeasonalTimelapse` accepts:
 
-- `center_lat_lon: tuple[float, float]` — latitude and longitude of the center.
-- `square_width_km: float` — width and height of the square area.
-- `time_range: tuple[datetime, datetime] | None = None` — UTC range to process;
-  defaults to the three years ending at midnight after the current UTC day.
-- `max_cloud_percent: float = 20.0` — maximum scene cloud percentage.
+| Input | Description |
+| --- | --- |
+| `center_lat_lon` | Latitude and longitude at the center of the timelapse. |
+| `square_width_km` | Width and height of the square area in kilometers. |
+| `time_range` | Optional UTC start and end times. Defaults to the latest three-year period. |
+| `max_cloud_percent` | Maximum reported scene cloud cover. Defaults to 20%. |
 
 JSON represents tuples as arrays and datetimes as RFC 3339 strings.
 
-## Run the workflow
+## Outputs
 
-You need `uv`, the Tilebox CLI, and a Tilebox API key. Export the key and verify
-that the CLI can reach your account:
+The workflow writes its result to `outputs/<job-specific-directory>/timelapse.webp` in the runner's working directory. Intermediate PNG frames are stored in the `frames/` directory beside it.
 
-```bash
-export TILEBOX_API_KEY=...
-tilebox account get --json
-```
+Output directories include the dates, coordinates, and square width, so separate runs do not overwrite each other. Outputs are local to the runners. The frame and assembly tasks therefore need runners that share the same working directory and filesystem.
 
-Install the dependencies and verify the release locally:
+## Explore locally
+
+Install the dependencies and run the tests with [uv](https://docs.astral.sh/uv/):
 
 ```bash
 uv sync
-tilebox workflow build-release
+uv run pytest
 ```
 
-Publish and deploy the workflow to your default cluster:
-
-```bash
-tilebox workflow publish-release --json
-tilebox workflow deploy-release --latest --json
-```
-
-If the default cluster uses a local dynamic runner, start one in another
-terminal. Concurrency allows independent frame tasks to overlap:
-
-```bash
-tilebox runner start --concurrency 4
-```
-
-Submit a three-year job around Vienna and wait for it to finish:
-
-```bash
-tilebox job submit \
-  --name vienna-seasonal-timelapse \
-  --task tilebox.com/seasonal-rgb-timelapse/BuildSeasonalTimelapse \
-  --version v1.0 \
-  --input '{
-    "center_lat_lon": [48.2082, 16.3738],
-    "square_width_km": 10,
-    "time_range": ["2023-09-01T00:00:00Z", "2026-09-01T00:00:00Z"],
-    "max_cloud_percent": 20
-  }' \
-  --wait
-```
-
-Use `"time_range": null` to select the default three-year range.
-
-## Outputs
-
-Frames and the animated WebP are written below `outputs/` in the runner's working
-directory. Log paths are relative to `outputs/`. Directory names contain the
-dates, coordinates, and square width so jobs for different inputs do not mix
-their frames, for example `20230902_20260902_48.33N_14.62E_10km/`. The final
-animation in each directory is named `timelapse.webp`.
-
-Frame names begin with the period's starting year and month, so ordinary lexical
-sorting is chronological, for example:
+The most useful places to start are:
 
 ```text
-25_12-26_02.png
-26_03-26_05.png
-26_06-26_08.png
-26_09-26_11.png
-```
-
-The final WebP is a flat, unlabelled square animation. Every frame uses the same
-fixed Sentinel-2 display curve—black point 5, white point 250, and gamma 1.05—so
-the animation does not flicker from per-frame autocontrast.
-
-Outputs are runner-local. The frame and assembly tasks must therefore execute on
-runners that share the same working directory and filesystem.
-
-## Project structure
-
-```text
-runner.py                              Registers the workflow tasks
-seasonal_rgb_timelapse/tasks.py        Defines the Tilebox task graph
-seasonal_rgb_timelapse/imagery.py      Reads, renders, and encodes imagery
+seasonal_rgb_timelapse/tasks.py    Task graph, dataset query, and job progress
+seasonal_rgb_timelapse/imagery.py  GeoTIFF reads, frame rendering, and WebP encoding
+runner.py                          Task registration
+tests/                             AOI, task input, rendering, and encoding behavior
 ```
