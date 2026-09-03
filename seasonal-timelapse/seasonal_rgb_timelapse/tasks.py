@@ -1,9 +1,12 @@
 from __future__ import annotations
 
+import hashlib
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from urllib.parse import quote
 from uuid import UUID
 
+import niquests
 import xarray as xr
 from pyproj import CRS, Transformer
 from shapely import Geometry, Point, box, transform
@@ -112,7 +115,7 @@ class RenderSeasonalFrame(Task):
         return "tilebox.com/seasonal-rgb-timelapse/RenderSeasonalFrame", "v1.0"
 
     async def execute(self, context: ExecutionContext) -> None:
-        """Read and render one unlabelled seasonal RGB frame."""
+        """Read and render one branded seasonal RGB frame."""
         context.current_task.display = f"Render {self.season}"
         datapoint = Client().dataset(DATASET).collection(COLLECTION).find(self.datapoint_id)
         stac_id = str(datapoint.stac_id.item())
@@ -125,10 +128,13 @@ class RenderSeasonalFrame(Task):
         frame_name = f"{self.season_start:%y_%m}-{end_year % 100:02d}_{end_month:02d}.png"
         relative_frame_path = Path("frames") / frame_name
         frame_path = _output_root() / self.output_name / relative_frame_path
-        render_frame(visual, destination=frame_path)
+        render_frame(visual, destination=frame_path, caption=stac_id)
         context.progress().done(1)
         context.logger.info(
-            "Rendered seasonal frame", frame=str(relative_frame_path), season=self.season, stac_id=stac_id
+            "Rendered seasonal frame",
+            frame=str(relative_frame_path),
+            season=self.season,
+            stac_id=stac_id,
         )
 
 
@@ -154,10 +160,44 @@ class AssembleTimelapse(Task):
         with context.tracer.span("encode-webp"):
             encode_animated(frame_paths, destination)
         context.logger.info(
-            f"Timelapse saved to {destination}",
+            "Timelapse saved to runner output directory",
+            local_path=destination,
             frames=len(frame_paths),
             size_bytes=destination.stat().st_size,
         )
+        with context.tracer.span("upload-webp"):
+            storage_path = _upload_to_workflow_storage(destination, relative_destination.as_posix(), context)
+        context.logger.info(
+            "Timelapse uploaded to workflow storage",
+            storage_path=storage_path,
+        )
+
+
+def _upload_to_workflow_storage(source: Path, object_path: str, context: ExecutionContext) -> str:
+    """Upload a file through the workflow storage HTTP endpoint."""
+    content = source.read_bytes()
+    digest = hashlib.sha256(content).hexdigest()
+
+    # Workflow storage is an upcoming API. Until the high-level client lands, reuse the low-level client connection
+    # inherited by both direct runners and release workers.
+    client = context.runner_context.storage_locations._client  # noqa: SLF001
+    api_url = client._auth["url"].removesuffix("/")  # noqa: SLF001
+    token = client._auth["token"]  # noqa: SLF001
+    if not token:
+        raise RuntimeError("workflow storage upload requires an authenticated Tilebox client")
+
+    encoded_path = quote(object_path, safe="/")
+    response = niquests.put(
+        f"{api_url}/v1/storage/{digest}/{encoded_path}",
+        data=content,
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Content-Type": "image/webp",
+        },
+        timeout=60,
+    )
+    response.raise_for_status()
+    return str(response.json()["path"])
 
 
 def _output_root() -> Path:

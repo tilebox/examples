@@ -1,0 +1,2 @@
+seasonal-timelapse/assets/*.png filter=lfs diff=lfs merge=lfs -text
+seasonal-timelapse/assets/*.ttf filter=lfs diff=lfs merge=lfs -text

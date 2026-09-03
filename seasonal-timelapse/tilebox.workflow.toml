@@ -8,6 +8,7 @@ include = [
   "pyproject.toml",
   "uv.lock",
   "runner.py",
+  "assets/**",
   "seasonal_rgb_timelapse/**",
 ]
 exclude = [

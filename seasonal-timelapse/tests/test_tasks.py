@@ -1,4 +1,7 @@
 from datetime import datetime, timezone
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import Mock
 from uuid import UUID
 
 import pytest
@@ -11,6 +14,7 @@ from seasonal_rgb_timelapse.tasks import (
     RenderSeasonalFrame,
     _season_name,
     _square_aoi,
+    _upload_to_workflow_storage,
 )
 
 
@@ -54,6 +58,33 @@ def test_root_task_defaults_to_an_optional_time_range() -> None:
 
     assert task.time_range is None
     assert task.max_cloud_percent == 20.0
+
+
+def test_upload_uses_runner_api_connection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Workflow storage reuses the API connection inherited by the runner."""
+    source = tmp_path / "timelapse.webp"
+    source.write_bytes(b"webp")
+    response = Mock()
+    response.json.return_value = {
+        "path": "/019d1c17-8636-7259-a5fd-dda1f9f26c1e/a57bb082e728a0cdce930ecfcccf4510a3a247be5f322b09b3a971a3f5ed34f8/seasonal output/timelapse.webp"
+    }
+    put = Mock(return_value=response)
+    monkeypatch.setattr("seasonal_rgb_timelapse.tasks.niquests.put", put)
+    client = SimpleNamespace(_auth={"url": "https://api.tilebox.com/", "token": "secret"})
+    context = SimpleNamespace(
+        runner_context=SimpleNamespace(storage_locations=SimpleNamespace(_client=client)),
+    )
+
+    storage_path = _upload_to_workflow_storage(source, "seasonal output/timelapse.webp", context)
+
+    put.assert_called_once_with(
+        "https://api.tilebox.com/v1/storage/a57bb082e728a0cdce930ecfcccf4510a3a247be5f322b09b3a971a3f5ed34f8/seasonal%20output/timelapse.webp",
+        data=b"webp",
+        headers={"Authorization": "Bearer secret", "Content-Type": "image/webp"},
+        timeout=60,
+    )
+    response.raise_for_status.assert_called_once_with()
+    assert storage_path == response.json.return_value["path"]
 
 
 def test_season_name_for_cross_year_season() -> None:

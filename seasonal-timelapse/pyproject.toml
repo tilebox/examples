@@ -5,8 +5,10 @@ description = "Build low-cloud seasonal Sentinel-2 RGB timelapses"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
+  "niquests>=3.21.0",
   "pillow>=11.3.0",
   "pyproj>=3.7.2",
+  "rasterio>=1.4.3",
   "shapely>=2.1.2",
   "tilebox",
   "xarray>=2025.9.0",
