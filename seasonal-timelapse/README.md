@@ -46,12 +46,12 @@ The root task uses the Tilebox dataset client to find low-cloud Sentinel-2 L2A s
 collection = Client().dataset(DATASET).collection(COLLECTION)
 scenes = collection.query(
     temporal_extent=TimeInterval(start=start, end=end),
-    spatial_extent=aoi,
+    spatial_extent={"geometry": aoi, "mode": "geometry_contains_filter"},
     filter=field("cloud_cover") <= self.max_cloud_percent,
 )
 ```
 
-The result is an xarray dataset. The task filters out scenes that do not cover the complete square, groups the remaining scenes into three-month periods, and chooses the lowest-cloud scene from each group.
+The containment mode returns only scenes whose geometry covers the complete square. The task groups the resulting xarray dataset into three-month periods and chooses the lowest-cloud scene from each group.
 
 ### Create parallel work
 

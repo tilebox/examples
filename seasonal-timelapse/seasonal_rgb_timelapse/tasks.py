@@ -58,23 +58,19 @@ class BuildSeasonalTimelapse(Task):
             f"{latitude}_{longitude}_{self.square_width_km:g}km"
         )
 
-        # Query the Sentinel-2 dataset for low-cloud scenes within the AOI and time range
+        # Query the Sentinel-2 dataset for low-cloud scenes covering the AOI in the time range
         with context.tracer.span("query"):
             context.logger.info("Searching for low-cloud scenes", start=start.isoformat(), end=end.isoformat())
             collection = Client().dataset(DATASET).collection(COLLECTION)
             scenes = collection.query(
                 temporal_extent=TimeInterval(start=start, end=end),
-                spatial_extent=aoi,
+                spatial_extent={"geometry": aoi, "mode": "geometry_contains_filter"},
                 filter=field("cloud_cover") <= self.max_cloud_percent,
             )
 
         if scenes.sizes.get("time", 0) == 0:
-            raise RuntimeError("no low-cloud scenes found in the requested time range")
+            raise RuntimeError("no low-cloud scenes cover the requested area in the requested time range")
         context.logger.info("Found low-cloud scenes", count=scenes.sizes.get("time", 0))
-
-        scenes = scenes.isel(time=[geometry.item().covers(aoi) for geometry in scenes.geometry])
-        if scenes.sizes.get("time", 0) == 0:
-            raise RuntimeError("no low-cloud scenes cover the requested area")
 
         best_scenes_per_season = (
             scenes.resample(time="QS-DEC")
