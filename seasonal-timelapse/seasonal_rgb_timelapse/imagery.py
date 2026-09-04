@@ -136,7 +136,7 @@ def render_frame(
     frame.save(destination, format="PNG", optimize=True)
 
 
-def encode_animated(frame_paths: list[Path], destination: Path, duration_ms: int = 500) -> None:
+def encode_animated(frame_paths: list[Path], destination: Path, duration_ms: int = 1500) -> None:
     """Encode equally sized image frames as a looping animated WebP."""
     if not frame_paths:
         raise ValueError("at least one frame is required")
