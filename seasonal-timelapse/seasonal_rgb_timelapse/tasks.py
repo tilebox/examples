@@ -151,13 +151,14 @@ class AssembleTimelapse(Task):
         context.current_task.display = f"Assemble WebP ({len(frame_paths)} frames)"
 
         relative_destination = Path(self.output_name) / "timelapse.webp"
-        destination = _output_root() / relative_destination
+        destination = Path.home() / "tilebox_outputs" / relative_destination
+        display_path = Path("~") / "tilebox_outputs" / relative_destination
         context.logger.info("Encoding animated WebP", frames=len(frame_paths))
         with context.tracer.span("encode-webp"):
             encode_animated(frame_paths, destination)
         context.logger.info(
             "Timelapse saved to runner output directory",
-            local_path=destination,
+            local_path=str(display_path),
             frames=len(frame_paths),
             size_bytes=destination.stat().st_size,
         )

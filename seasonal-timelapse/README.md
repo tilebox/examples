@@ -89,7 +89,7 @@ JSON represents tuples as arrays and datetimes as RFC 3339 strings.
 
 ## Outputs
 
-The workflow writes its result to `outputs/<job-specific-directory>/timelapse.webp` in the runner's working directory and uploads it to workflow storage as `<job-specific-directory>/timelapse.webp`. The final structured log message includes its `storage_path`, which the Console quickstart uses to display the animation. Intermediate PNG frames are stored in the local `frames/` directory beside it.
+The workflow writes its result to `~/tilebox_outputs/<job-specific-directory>/timelapse.webp` in the runner user's home directory and uploads it to workflow storage as `<job-specific-directory>/timelapse.webp`. The final structured log messages include the local path in `~/...` form and the uploaded `storage_path`, which the Console quickstart uses to display the animation. Intermediate PNG frames remain under `outputs/<job-specific-directory>/frames/` in the runner's working directory.
 
 Output directories include the dates, coordinates, and square width, so separate runs do not overwrite each other. Intermediate outputs are local to the runners. The frame and assembly tasks therefore need runners that share the same working directory and filesystem.
 
