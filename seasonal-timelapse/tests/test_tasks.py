@@ -12,6 +12,7 @@ from shapely import transform
 from seasonal_rgb_timelapse.tasks import (
     BuildSeasonalTimelapse,
     RenderSeasonalFrame,
+    _dataset_client,
     _season_name,
     _square_aoi,
     _upload_to_workflow_storage,
@@ -58,6 +59,23 @@ def test_root_task_defaults_to_an_optional_time_range() -> None:
 
     assert task.time_range is None
     assert task.max_cloud_percent == 20.0
+
+
+def test_dataset_client_uses_runner_api_connection(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Dataset access reuses the API connection inherited by the runner."""
+    dataset_client = Mock()
+    client_type = Mock(return_value=dataset_client)
+    monkeypatch.setattr("seasonal_rgb_timelapse.tasks.Client", client_type)
+    auth = {"url": "https://api.tilebox.com", "token": "secret"}
+    workflow_client = SimpleNamespace(_auth=auth)
+    context = SimpleNamespace(
+        runner_context=SimpleNamespace(storage_locations=SimpleNamespace(_client=workflow_client)),
+    )
+
+    result = _dataset_client(context)
+
+    client_type.assert_called_once_with(url="https://api.tilebox.com", token=auth["token"])
+    assert result is dataset_client
 
 
 def test_upload_uses_runner_api_connection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

@@ -61,7 +61,7 @@ class BuildSeasonalTimelapse(Task):
         # Query the Sentinel-2 dataset for low-cloud scenes covering the AOI in the time range
         with context.tracer.span("query"):
             context.logger.info("Searching for low-cloud scenes", start=start.isoformat(), end=end.isoformat())
-            collection = Client().dataset(DATASET).collection(COLLECTION)
+            collection = _dataset_client(context).dataset(DATASET).collection(COLLECTION)
             scenes = collection.query(
                 temporal_extent=TimeInterval(start=start, end=end),
                 spatial_extent={"geometry": aoi, "mode": "geometry_contains_filter"},
@@ -113,7 +113,7 @@ class RenderSeasonalFrame(Task):
     async def execute(self, context: ExecutionContext) -> None:
         """Read and render one branded seasonal RGB frame."""
         context.current_task.display = f"Render {self.season}"
-        datapoint = Client().dataset(DATASET).collection(COLLECTION).find(self.datapoint_id)
+        datapoint = _dataset_client(context).dataset(DATASET).collection(COLLECTION).find(self.datapoint_id)
         stac_id = str(datapoint.stac_id.item())
 
         with context.tracer.span("read-sentinel-2-window"):
@@ -168,6 +168,12 @@ class AssembleTimelapse(Task):
             "Timelapse uploaded to workflow storage",
             storage_path=storage_path,
         )
+
+
+def _dataset_client(context: ExecutionContext) -> Client:
+    """Create a dataset client using the API connection inherited by the runner."""
+    workflow_client = context.runner_context.storage_locations._client  # noqa: SLF001
+    return Client(**workflow_client._auth)  # noqa: SLF001
 
 
 def _upload_to_workflow_storage(source: Path, object_path: str, context: ExecutionContext) -> str:

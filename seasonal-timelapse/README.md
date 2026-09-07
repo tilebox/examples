@@ -43,7 +43,8 @@ The quickstart provides `center_lat_lon` and sets `square_width_km` to 10. When 
 The root task uses the Tilebox dataset client to find low-cloud Sentinel-2 L2A scenes for the requested area and time range:
 
 ```python
-collection = Client().dataset(DATASET).collection(COLLECTION)
+workflow_client = context.runner_context.storage_locations._client
+collection = Client(**workflow_client._auth).dataset(DATASET).collection(COLLECTION)
 scenes = collection.query(
     temporal_extent=TimeInterval(start=start, end=end),
     spatial_extent={"geometry": aoi, "mode": "geometry_contains_filter"},
@@ -52,6 +53,8 @@ scenes = collection.query(
 ```
 
 The containment mode returns only scenes whose geometry covers the complete square. The task groups the resulting xarray dataset into three-month periods and chooses the lowest-cloud scene from each group.
+Both the initial query and subsequent scene lookups inherit the API URL and credentials from the authenticated workflow
+client, so tasks do not need a separate `TILEBOX_API_KEY` environment variable.
 
 ### Create parallel work
 
