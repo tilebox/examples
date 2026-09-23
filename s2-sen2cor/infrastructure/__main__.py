@@ -3,7 +3,18 @@ import pulumi_azure as az
 from tilebox_iac import azure
 
 config = pulumi.Config()
-group = az.core.ResourceGroup("sen2cor", location=config.get("location") or "uaenorth")
+provider = az.Provider(
+    "azure",
+    features=az.ProviderFeaturesArgs(
+        storage=az.ProviderFeaturesStorageArgs(data_plane_available=False),
+        virtual_machine_scale_set=az.ProviderFeaturesVirtualMachineScaleSetArgs(
+            roll_instances_when_required=True,
+            reimage_on_manual_upgrade=True,
+        ),
+    ),
+)
+opts = pulumi.ResourceOptions(provider=provider)
+group = az.core.ResourceGroup("sen2cor", location=config.get("location") or "uaenorth", opts=opts)
 storage = azure.BlobStorage(
     "sen2cor-results",
     resource_group_name=group.name,
@@ -11,7 +22,7 @@ storage = azure.BlobStorage(
     account_name=config.require("storageAccountName"),
     container_name="results",
     public_read=True,
-    opts=pulumi.ResourceOptions(protect=True),
+    opts=pulumi.ResourceOptions.merge(opts, pulumi.ResourceOptions(protect=True)),
 )
 
 # Create storage and the private registry before building the worker image.
@@ -24,13 +35,16 @@ if deploy_workers:
         sku="Basic",
         admin_enabled=False,
         anonymous_pull_enabled=False,
+        azuread_authentication_as_arm_policy_enabled=True,
         role_assignment_mode="LegacyRegistryPermissions",
+        opts=opts,
     )
     az.authorization.Assignment(
         "image-builder",
-        principal_id=az.core.get_client_config().object_id,
+        principal_id=az.core.get_client_config(opts=pulumi.InvokeOptions(provider=provider)).object_id,
         scope=registry.id,
         role_definition_name="AcrPush",
+        opts=opts,
     )
     pulumi.export("registryName", registry.name)
     pulumi.export("registryLoginServer", registry.login_server)
@@ -41,10 +55,10 @@ if deploy_workers and not runner_image:
 
 # Storage-only deployment also supports on-prem workers.
 if deploy_workers and runner_image:
-    network = azure.Network("sen2cor", resource_group_name=group.name, location=group.location)
+    network = azure.Network("sen2cor", resource_group_name=group.name, location=group.location, opts=opts)
     vault_id = config.require("keyVaultId")
     environment = {
-        name: azure.Secret(f"sen2cor-{key}", vault_id=vault_id, secret_data=config.require_secret(key))
+        name: azure.Secret(f"sen2cor-{key}", vault_id=vault_id, secret_data=config.require_secret(key), opts=opts)
         for name, key in {
             "TILEBOX_API_KEY": "tileboxApiKey",
             "CDSE_ACCESS_KEY": "cdseAccessKey",
@@ -73,7 +87,8 @@ if deploy_workers and runner_image:
         runner_image=runner_image,
         container_registry_id=registry.id,
         container_registry_server=registry.login_server,
-        blob_container_ids=[storage.container_resource_id],
+        blob_container_ids={"results": storage.container_resource_id},
+        opts=opts,
     )
     pulumi.export("runnerIdentityClientId", cluster.identity.client_id)
 

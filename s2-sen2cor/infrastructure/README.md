@@ -50,6 +50,10 @@ reviewed IaC commit used for each deployment. It must also support the explicit
 `BlobStorage(public_read=True)` option. Run `uv sync` here after placing it
 alongside `examples`.
 
+Storage grants use stable names, such as `blob_container_ids={"results": ...}`.
+If you deployed an earlier revision with positional grants, migrate their Pulumi
+state or add aliases before updating; do not apply grant replacements blindly.
+
 ## Configure a file backend
 
 Run these commands from this directory on a machine with durable, private disk:
@@ -135,7 +139,8 @@ pulumi up
 ```
 
 Workers authenticate to ACR with managed identity and an `AcrPull` grant. Registry
-admin passwords and anonymous pulls are disabled. `runnerImage` uses a digest so
+admin passwords and anonymous pulls are disabled. Authentication with ARM-audience
+tokens is enabled for the managed-identity token exchange. `runnerImage` uses a digest so
 replacements run the same image. Rebuild and update the digest when code changes;
 do not unset `runnerImage` on an existing stack, because that removes workers.
 
@@ -146,9 +151,16 @@ are not embedded as plaintext in Azure custom data. The host environment file
 and Docker access remain privileged. RBAC changes can take time to propagate.
 
 The worker runs the task classes listed in `runner.py`; a separate Tilebox
-release is not required. VM scale set image and configuration updates are manual:
-let active tasks finish before reimaging instances. CPU-based autoscaling does not wake a cluster from zero or
-drain Tilebox tasks automatically. Keep this example at one worker initially.
+release is not required. The Azure provider automatically updates and reimages
+instances when custom data changes, including changes to the image digest. The
+VM scale set uses `Manual` upgrade mode because the provider performs the update;
+no separate manual reimage command is needed. This is not a health-gated sequential
+rollout: updates can interrupt active tasks, which Tilebox retries. Avoid updating
+while a scene is processing if you want to preserve that work.
+
+The explicit provider also disables storage data-plane probes so resource refresh
+does not require Shared Key access. CPU-based autoscaling does not wake a cluster
+from zero or drain Tilebox tasks automatically. Keep this example at one worker initially.
 
 ## On-prem compute and cleanup
 
