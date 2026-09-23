@@ -121,7 +121,9 @@ put `L2A_Process` on `PATH`, export the five variables above, and run
 GIPP configuration; do not reuse settings from an earlier installation.
 Before correction, the worker checks the version reported by `L2A_Process --help`
 and rejects any version other than 02.12.04, including unrecognized output.
-The catalog's queryable `sen2cor_version` field records this checked version.
+The catalog's `sen2cor_version` field records this checked version. Server-side
+string filters use `source_datapoint_id` and `pipeline_version`; the schema uses
+Tilebox's two available queryable string fields for those lookups.
 Pipeline version `sen2cor-02.12.04-ndvi-v2` does not reuse completion records from
 v1, where the processor version was not checked. Existing v1 catalog rows remain
 unchanged; the notebook filters for the current pipeline version.
