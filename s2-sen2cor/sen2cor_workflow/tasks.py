@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from time import monotonic
 
 from shapely.geometry import box
 from tilebox.datasets import Client
@@ -32,6 +33,15 @@ class ProcessArea(Task):
         west, south, east, north = self.bounds
         if not (-180 <= west < east <= 180 and -90 <= south < north <= 90):
             raise ValueError("Expected WGS84 west, south, east, north bounds without antimeridian crossing")
+        context.logger.info(
+            "Querying L1C products",
+            collection=self.source_collection,
+            start=self.start,
+            end=self.end,
+            bounds=self.bounds,
+            max_cloud_cover=self.max_cloud_cover,
+            max_scenes=self.max_scenes,
+        )
         scenes = (
             Client()
             .dataset(SOURCE_DATASET)
@@ -41,12 +51,20 @@ class ProcessArea(Task):
                 spatial_extent=box(*self.bounds),
             )
         )
-        if scenes.sizes.get("time", 0) == 0:
+        matched = scenes.sizes.get("time", 0)
+        if matched == 0:
             context.logger.info("No matching L1C products")
             return
         # Copernicus exposes cloud_cover, but does not mark it queryable server-side.
         scenes = scenes.isel(time=scenes.cloud_cover <= self.max_cloud_cover)
+        cloud_filtered = scenes.sizes["time"]
         scenes = scenes.sortby("time").isel(time=slice(0, self.max_scenes))
+        context.logger.info(
+            "Selected L1C products",
+            matched=matched,
+            passing_cloud_filter=cloud_filtered,
+            selected=scenes.sizes["time"],
+        )
         if scenes.sizes["time"] == 0:
             context.logger.info("No L1C products pass the cloud filter")
             return
@@ -57,6 +75,7 @@ class ProcessArea(Task):
             ],
             max_retries=2,
         )
+        context.logger.info("Submitted scene tasks", count=scenes.sizes["time"], max_retries=2)
 
 
 class ProcessScene(Task):
@@ -67,6 +86,8 @@ class ProcessScene(Task):
 
     def execute(self, context: ExecutionContext) -> None:
         """Process and publish the scene, reusing completed outputs on retry."""
+        started = monotonic()
+        context.logger.info("Starting scene", source_id=self.source_id, collection=self.source_collection)
         source = Client().dataset(SOURCE_DATASET).collection(self.source_collection).find(self.source_id)
         base_url = os.environ.get("RESULTS_STORAGE_URL", Path("outputs/results").resolve().as_uri())
         with open_store(base_url) as store:
@@ -80,9 +101,41 @@ class ProcessScene(Task):
                         cache_directory=None,
                     )
                     context.logger.info("Downloading L1C SAFE", source_id=self.source_id)
+                    phase = monotonic()
                     input_safe = storage.download(source, output_dir=root / "input", show_progress=False)
+                    context.logger.info(
+                        "L1C download complete", source_id=self.source_id, seconds=round(monotonic() - phase, 2)
+                    )
+                    phase = monotonic()
+                    context.logger.info("Running Sen2Cor", source_id=self.source_id)
                     product = correct(input_safe, root / "output")
+                    context.logger.info(
+                        "Sen2Cor complete",
+                        source_id=self.source_id,
+                        product=product.name,
+                        seconds=round(monotonic() - phase, 2),
+                    )
+                    phase = monotonic()
+                    context.logger.info("Deriving NDVI and RGB", source_id=self.source_id)
                     ndvi_path, thumbnail = derive(product, root / "derived")
+                    context.logger.info(
+                        "Derived products complete", source_id=self.source_id, seconds=round(monotonic() - phase, 2)
+                    )
+                    phase = monotonic()
+                    context.logger.info("Publishing result assets", source_id=self.source_id)
                     record = publish(store, base_url, self.source_id, product, ndvi_path, thumbnail)
+                    context.logger.info(
+                        "Publication complete", source_id=self.source_id, seconds=round(monotonic() - phase, 2)
+                    )
+            else:
+                context.logger.info("Reusing completed result", source_id=self.source_id, product=record["title"])
+            context.logger.info(
+                "Registering L2A metadata", source_id=self.source_id, dataset=os.environ["RESULTS_DATASET"]
+            )
             register(os.environ["RESULTS_DATASET"], source, record)
-            context.logger.info("L2A result registered", source_id=self.source_id, product=record["title"])
+            context.logger.info(
+                "L2A result registered",
+                source_id=self.source_id,
+                product=record["title"],
+                seconds=round(monotonic() - started, 2),
+            )

@@ -17,7 +17,6 @@ def create_catalog(code_name: str):
             {"name": "title", "type": str, "roles": ["primary_title"]},
             *[{"name": name, "type": str, "queryable": True} for name in ("source_datapoint_id", "pipeline_version")],
             {"name": "sen2cor_version", "type": str},
-            *[{"name": name, "type": str} for name in ("product_url", "metadata_url", "ndvi_url", "thumbnail_url")],
             {"name": "assets", "type": Assets},
             {"name": "storage", "type": Storage},
             # Asset schema metadata does not configure storage-client credentials.
@@ -34,22 +33,18 @@ def metadata_row(source: xr.Dataset, record: dict) -> xr.Dataset:
     assets = AssetCollection.from_assets(
         [
             Asset(
-                key="ndvi",
-                primary=AssetLocation(href=record["ndvi_url"]),
-                media_type="image/tiff; application=geotiff; profile=cloud-optimized",
-                roles=frozenset({"data"}),
-            ),
-            Asset(
-                key="metadata",
-                primary=AssetLocation(href=record["metadata_url"]),
-                media_type="application/xml",
-                roles=frozenset({"metadata"}),
-            ),
+                key=key,
+                primary=AssetLocation(href=asset["href"]),
+                media_type=asset.get("media_type"),
+                roles=frozenset(asset["roles"]),
+            )
+            for key, asset in record["assets"].items()
         ]
     ).to_fields()
     fields = {"geometry": ("time", np.array([source.geometry.item()], dtype=object))}
     for name, value in record.items():
-        fields[name] = ("time", [value])
+        if name != "assets":
+            fields[name] = ("time", [value])
     for name, value in assets.items():
         # Keep each nested asset field as one object in the single-row dataset.
         fields[name] = ("time", np.array([value], dtype=object))

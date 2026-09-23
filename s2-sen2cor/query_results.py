@@ -18,6 +18,7 @@ import rasterio
 from IPython.display import Image, display
 from shapely.geometry import box
 from tilebox.datasets import Client, field
+from tilebox.datasets.assets import AssetCollection
 
 from sen2cor_workflow.processing import PIPELINE_VERSION
 from sen2cor_workflow.results import download_asset
@@ -36,8 +37,9 @@ if scenes.sizes.get("time", 0) == 0:
 scene = scenes.sortby("time").isel(time=0)
 output_dir = Path("outputs") / str(scene.id.item())
 output_dir.mkdir(parents=True, exist_ok=True)
-for field_name, filename in [("ndvi_url", "ndvi.tif"), ("thumbnail_url", "thumbnail.png")]:
-    download_asset(str(scene[field_name].item()), output_dir / filename)
+assets = AssetCollection.from_datapoint(scene)
+for key, filename in [("ndvi", "ndvi.tif"), ("rgb", "thumbnail.png")]:
+    download_asset(assets[key].primary.href, output_dir / filename)
 display(Image(filename=str(output_dir / "thumbnail.png")))
 
 # %%
