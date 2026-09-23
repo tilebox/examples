@@ -6,3 +6,4 @@ workflows-download-s2-for-aois/s2-data
 .DS_Store
 workflows-download-s2-for-aois/.local.env
 .venv
+.amp/
