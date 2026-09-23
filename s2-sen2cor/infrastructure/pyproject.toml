@@ -1,0 +1,9 @@
+[project]
+name = "s2-sen2cor-infrastructure"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = ["pulumi>=3.186.0", "pulumi-azure>=6.0.0", "tilebox-iac"]
+
+# Check out the Azure implementation alongside examples before syncing.
+[tool.uv.sources]
+tilebox-iac = { path = "../../../tilebox-iac", editable = true }

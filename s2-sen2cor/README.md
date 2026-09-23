@@ -1,4 +1,4 @@
-# Sentinel-2 atmospheric correction on a laptop
+# Sentinel-2 atmospheric correction on a laptop or Azure
 
 Find Sentinel-2 L1C imagery with Tilebox, run ESA Sen2Cor to produce L2A surface
 reflectance, store the result on local disk or Azure Blob Storage, and register
@@ -50,8 +50,9 @@ date. Copy the secret key when shown; it is only displayed once. See the
 if you need an account, and the [S3 access guide](https://documentation.dataspace.copernicus.eu/APIs/S3.html)
 for details. Supply these keys to the worker as `CDSE_ACCESS_KEY` and `CDSE_SECRET_KEY`.
 
-Start a laptop worker below. Use a dedicated Tilebox cluster for local testing
-so a remote worker cannot pick up a job intended for your disk.
+Start a laptop worker below, or deploy one using the
+[Azure instructions](infrastructure/README.md). Use a dedicated Tilebox cluster
+for local testing so an Azure worker cannot pick up a job intended for your disk.
 Then submit a small job from a second terminal with the same Tilebox environment:
 
 ```bash
@@ -124,7 +125,7 @@ before changing capacity. Scratch data is deleted when the task finishes.
 | `RESULTS_DATASET` | Full custom dataset slug |
 | `CDSE_ACCESS_KEY`, `CDSE_SECRET_KEY` | [Create CDSE S3 credentials here](https://eodata-s3keysmanager.dataspace.copernicus.eu/); not an Azure or AWS account key |
 | `RESULTS_STORAGE_URL` | `file:///absolute/path` or `https://<account>.blob.core.windows.net/results`; defaults to local `./outputs/results` |
-| `AZURE_CLIENT_ID` | Optional Azure identity client ID when using Blob Storage |
+| `AZURE_CLIENT_ID` | User-assigned managed identity; Azure IaC injects this |
 | `WORK_DIR` | Scratch directory, `/work` in the image |
 
 To write to Azure from a laptop or on-prem compute, export `RESULTS_STORAGE_URL`

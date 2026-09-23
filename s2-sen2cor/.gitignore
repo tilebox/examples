@@ -4,3 +4,5 @@
 .ruff_cache/
 outputs/
 query_results.ipynb
+infrastructure/Pulumi.*.yaml
+infrastructure/.pulumi/
