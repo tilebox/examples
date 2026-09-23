@@ -14,11 +14,12 @@ def create_catalog(code_name: str):
         DatasetKind.SPATIOTEMPORAL,
         code_name,
         fields=[
-            {"name": "title", "type": str, "queryable": True, "roles": ["primary_title"]},
+            {"name": "title", "type": str, "roles": ["primary_title"]},
             *[
                 {"name": name, "type": str, "queryable": True}
-                for name in ("source_datapoint_id", "pipeline_version", "sen2cor_version")
+                for name in ("source_datapoint_id", "pipeline_version")
             ],
+            {"name": "sen2cor_version", "type": str},
             *[{"name": name, "type": str} for name in ("product_url", "metadata_url", "ndvi_url", "thumbnail_url")],
             {"name": "assets", "type": Assets},
             {"name": "storage", "type": Storage},

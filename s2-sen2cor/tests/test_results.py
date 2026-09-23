@@ -9,10 +9,22 @@ from obstore.store import AzureStore, LocalStore, MemoryStore
 from shapely.geometry import box
 from tilebox.datasets.assets import AssetCollection
 
-from sen2cor_workflow import results, tasks
+from sen2cor_workflow import catalog, results, tasks
 from sen2cor_workflow.catalog import metadata_row
 from sen2cor_workflow.results import completion_key, download_asset, open_store, publish, read_completion
 from sen2cor_workflow.tasks import ProcessScene
+
+
+def test_catalog_uses_only_two_queryable_strings(monkeypatch):
+    """Reserve the backend's two string indexes for source and pipeline lookups."""
+    client = MagicMock()
+    monkeypatch.setattr(catalog, "Client", lambda: client)
+    catalog.create_catalog("test_results")
+    fields = client.create_or_update_dataset.call_args.kwargs["fields"]
+    indexed = {item["name"] for item in fields if item["type"] is str and item.get("queryable")}
+    assert indexed == {"source_datapoint_id", "pipeline_version"}
+    assert any(item["name"] == "sen2cor_version" for item in fields)
+    client.create_or_update_dataset.return_value.get_or_create_collection.assert_called_once_with("L2A")
 
 
 @pytest.fixture(params=["local", "memory"])
