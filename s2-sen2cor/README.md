@@ -29,18 +29,31 @@ inspect the source dataset's collections before selecting another satellite.
 ## Set up the catalog and submit a job
 
 Install [uv](https://docs.astral.sh/uv/) and provide a Tilebox API key with access
-to the Copernicus catalog, your custom dataset, and your workflow cluster.
+to the Copernicus catalog and default workflow cluster, plus permission to create
+a dataset and ingest results into it. Run these commands from `s2-sen2cor`:
 
 ```bash
 uv sync --locked
 export TILEBOX_API_KEY=...       # supply through your secret manager or shell
-export TILEBOX_CLUSTER=...       # an existing Tilebox cluster slug
-uv run create_catalog.py sen2cor_outputs
-export RESULTS_DATASET=...      # full dataset slug from the Tilebox Console
+export TILEBOX_CLUSTER=default
+uv run create_catalog.py sen2cor_test
 ```
 
-Create the dataset once before starting workers. The worker does not change
-schemas. Use a fresh dataset for incompatible schema changes.
+`create_catalog.py` creates the custom results dataset and its `L2A` collection,
+including the fields for processor versions, NDVI, and thumbnails. Use an unused
+code name such as `sen2cor_test` for a test run; the command updates the schema if
+that code name already exists. You do not need to create the dataset manually.
+
+Open the dataset in the [Tilebox Console](https://console.tilebox.com) and copy its
+full slug, including the workspace prefix. Set it in both the worker and the
+terminal used to query results:
+
+```bash
+export RESULTS_DATASET=...      # paste the full slug, not just sen2cor_test
+```
+
+Create the dataset once before starting workers. The worker does not change its
+schema. Use a fresh dataset for incompatible schema changes.
 
 Create CDSE S3 credentials in the
 [Copernicus S3 credentials manager](https://eodata-s3keysmanager.dataspace.copernicus.eu/).
@@ -51,8 +64,9 @@ if you need an account, and the [S3 access guide](https://documentation.dataspac
 for details. Supply these keys to the worker as `CDSE_ACCESS_KEY` and `CDSE_SECRET_KEY`.
 
 Start a laptop worker below, or deploy one using the
-[Azure instructions](infrastructure/README.md). Use a dedicated Tilebox cluster
-for local testing so an Azure worker cannot pick up a job intended for your disk.
+[Azure instructions](infrastructure/README.md). This example uses the default Tilebox cluster.
+Before submitting a job, check that no other worker on that cluster can execute
+these task classes with different settings or pick up work intended for your disk.
 Then submit a small job from a second terminal with the same Tilebox environment:
 
 ```bash
