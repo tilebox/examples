@@ -5,6 +5,16 @@ deploys the Sen2Cor worker after you build its image. You do not need a registry
 account, a public image, or a local Docker installation. Azure builds the image
 from this example's Dockerfile and source files.
 
+**Result blobs are publicly readable.** Anyone with a blob URL can download the
+L2A files, NDVI, RGB image, and completion records without credentials. Anonymous
+container listing and writes are disabled; workers still authenticate writes with
+managed identity. Do not use this setup for confidential data. The image registry
+remains private.
+
+This is a temporary choice until Tilebox's Azure storage-client authentication is
+available. It does not add Azure BYOK support or Console thumbnail previews. The
+workflow and notebook use obstore for Azure access, separately from that client.
+
 The worker defaults to one non-Spot
 Standard_D8s_v5 worker (8 vCPU, 32 GiB RAM) with a 256-GiB OS disk. Both min and max
 are one to avoid CPU-driven scale-in interrupting long scene processing. Expand
@@ -36,7 +46,8 @@ The path dependency uses that checkout. Until Azure support is
 merged and released, use the changes from the Azure implementation thread, not an
 older `main` without that provider. The checkout must also include managed-identity
 ACR pulls (`container_registry_id` and `container_registry_server`). Record the
-reviewed IaC commit used for each deployment. Run `uv sync` here after placing it
+reviewed IaC commit used for each deployment. It must also support the explicit
+`BlobStorage(public_read=True)` option. Run `uv sync` here after placing it
 alongside `examples`.
 
 ## Configure a file backend

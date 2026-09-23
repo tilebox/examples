@@ -65,6 +65,8 @@ for details. Supply these keys to the worker as `CDSE_ACCESS_KEY` and `CDSE_SECR
 
 Start a laptop worker below, or deploy one using the
 [Azure instructions](infrastructure/README.md). This example uses the default Tilebox cluster.
+The Azure setup makes result blobs publicly readable; use it only for data you
+can share. Its image registry remains private.
 Before submitting a job, check that no other worker on that cluster can execute
 these task classes with different settings or pick up work intended for your disk.
 Then submit a small job from a second terminal with the same Tilebox environment:

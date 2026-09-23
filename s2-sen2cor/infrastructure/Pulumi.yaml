@@ -1,5 +1,5 @@
 name: s2-sen2cor
-description: Azure Sen2Cor workers and private results storage
+description: Azure Sen2Cor workers and publicly readable results storage
 runtime:
   name: python
   options:

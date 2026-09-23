@@ -10,6 +10,7 @@ storage = azure.BlobStorage(
     location=group.location,
     account_name=config.require("storageAccountName"),
     container_name="results",
+    public_read=True,
     opts=pulumi.ResourceOptions(protect=True),
 )
 
