@@ -86,7 +86,8 @@ def test_metadata_preserves_acquisition_geometry_and_assets(storage, files):
     assert row.geometry.item().equals(source.geometry.item())
     assets = AssetCollection.from_datapoint(row.isel(time=0))
     assert assets["ndvi"].primary.href == record["ndvi_url"]
-    assert {role.name for role in assets["thumbnail"].roles} == {"THUMBNAIL"}
+    assert set(assets) == {"ndvi", "metadata"}
+    assert row.thumbnail_url.item() == record["thumbnail_url"]
     xr.testing.assert_identical(row, metadata_row(source, record))
 
 
