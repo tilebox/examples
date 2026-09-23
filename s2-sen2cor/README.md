@@ -32,10 +32,14 @@ Install [uv](https://docs.astral.sh/uv/) and provide a Tilebox API key with acce
 to the Copernicus catalog and default workflow cluster, plus permission to create
 a dataset and ingest results into it. Run these commands from `s2-sen2cor`:
 
+Open the Default cluster in the [Tilebox Console](https://console.tilebox.com) and
+copy its slug. Use that full value for `TILEBOX_CLUSTER`; the display name
+"Default" and the literal value `default` are not cluster slugs.
+
 ```bash
 uv sync --locked
 export TILEBOX_API_KEY=...       # supply through your secret manager or shell
-export TILEBOX_CLUSTER=default
+export TILEBOX_CLUSTER=...       # full slug of your Default cluster
 uv run create_catalog.py sen2cor_test
 ```
 
