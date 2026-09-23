@@ -12,7 +12,7 @@ from rasterio.vrt import WarpedVRT
 
 SEN2COR_VERSION = "02.12.04"
 # Increment for any change to correction settings, masks, or derived products.
-PIPELINE_VERSION = "sen2cor-02.12.04-ndvi-v2"
+PIPELINE_VERSION = "sen2cor-02.12.04-ndvi-v3"
 NODATA = -9999.0
 VALID_SCL = (4, 5, 6)  # vegetation, bare soil, water; exclude clouds, shadows, snow and uncertain pixels
 

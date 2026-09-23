@@ -24,6 +24,7 @@ def test_catalog_uses_only_two_queryable_strings(monkeypatch):
     indexed = {item["name"] for item in fields if item["type"] is str and item.get("queryable")}
     assert indexed == {"source_datapoint_id", "pipeline_version"}
     assert any(item["name"] == "sen2cor_version" for item in fields)
+    assert not any(item["name"].endswith("_url") for item in fields)
     client.create_or_update_dataset.return_value.get_or_create_collection.assert_called_once_with("L2A")
 
 
@@ -66,10 +67,11 @@ def test_partial_upload_never_publishes_completion(storage, files, monkeypatch):
     assert read_completion(store, "source") is None
 
 
-def test_unchecked_v1_completion_is_not_reused(storage):
-    """Ignore completion records created before processor version validation."""
+@pytest.mark.parametrize("version", ["v1", "v2"])
+def test_old_completion_is_not_reused(storage, version):
+    """Ignore completion records from older processing and metadata schemas."""
     store, _ = storage
-    obs.put(store, "sen2cor-02.12.04-ndvi-v1/source/complete.json", b'{"sen2cor_version":"02.12.04"}')
+    obs.put(store, f"sen2cor-02.12.04-ndvi-{version}/source/complete.json", b'{"sen2cor_version":"02.12.04"}')
     assert read_completion(store, "source") is None
 
 
@@ -93,13 +95,16 @@ def test_metadata_preserves_acquisition_geometry_and_assets(storage, files):
     row = metadata_row(source, record)
     assert row.sizes == {"time": 1}
     assert row.sen2cor_version.item() == "02.12.04"
-    assert row.pipeline_version.item() == "sen2cor-02.12.04-ndvi-v2"
+    assert row.pipeline_version.item() == "sen2cor-02.12.04-ndvi-v3"
     assert row.time.values[0] == source.time.values
     assert row.geometry.item().equals(source.geometry.item())
     assets = AssetCollection.from_datapoint(row.isel(time=0))
-    assert assets["ndvi"].primary.href == record["ndvi_url"]
-    assert set(assets) == {"ndvi", "metadata"}
-    assert row.thumbnail_url.item() == record["thumbnail_url"]
+    assert set(assets) == {"product", "ndvi", "metadata", "rgb"}
+    assert not any(name.endswith("_url") for name in row.data_vars)
+    for key, asset in assets.items():
+        assert asset.primary.href == record["assets"][key]["href"]
+        assert "THUMBNAIL" not in {role.name for role in asset.roles}
+    assert assets["product"].primary.href.endswith("output%20space.SAFE/")
     xr.testing.assert_identical(row, metadata_row(source, record))
 
 
@@ -110,9 +115,11 @@ def test_local_publication_and_notebook_reads_need_no_azure(files, tmp_path, mon
     url = (tmp_path / "new results").as_uri()
     with open_store(url) as store:
         record = publish(store, url + "/", "source", *files)
-    for field, expected in [("ndvi_url", b"raster"), ("thumbnail_url", b"image"), ("metadata_url", b"metadata")]:
-        destination = tmp_path / field
-        download_asset(record[field], destination)
+    source = xr.Dataset({"geometry": box(54, 24, 55, 25)}, coords={"time": np.datetime64("2026-08-17")})
+    assets = AssetCollection.from_datapoint(metadata_row(source, record).isel(time=0))
+    for key, expected in [("ndvi", b"raster"), ("rgb", b"image"), ("metadata", b"metadata")]:
+        destination = tmp_path / key
+        download_asset(assets[key].primary.href, destination)
         assert destination.read_bytes() == expected
     credential.assert_not_called()
 
@@ -151,9 +158,15 @@ def test_laptop_task_publishes_then_retries_catalog_without_reprocessing(files, 
     register = MagicMock(side_effect=[RuntimeError("catalog unavailable"), None])
     monkeypatch.setattr(tasks, "register", register)
     task = ProcessScene(source_id="source", source_collection="S2A_S2MSI1C")
+    context = MagicMock()
     with pytest.raises(RuntimeError, match="catalog unavailable"):
-        task.execute(MagicMock())
-    task.execute(MagicMock())
+        task.execute(context)
+    task.execute(context)
+    messages = [call.args[0] for call in context.logger.info.call_args_list]
+    assert messages.count("Running Sen2Cor") == 1
+    assert messages.count("Reusing completed result") == 1
+    assert messages.count("Registering L2A metadata") == 2
+    assert messages.count("L2A result registered") == 1
     cdse.assert_called_once_with(
         access_key="test-cdse-access", secret_access_key="test-cdse-secret", cache_directory=None
     )
@@ -161,6 +174,6 @@ def test_laptop_task_publishes_then_retries_catalog_without_reprocessing(files, 
     assert register.call_count == 2
     assert register.call_args_list[0].args[2] == register.call_args_list[1].args[2]
     destination = tmp_path / "notebook.tif"
-    download_asset(register.call_args.args[2]["ndvi_url"], destination)
+    download_asset(register.call_args.args[2]["assets"]["ndvi"]["href"], destination)
     assert destination.read_bytes() == b"raster"
     credential.assert_not_called()

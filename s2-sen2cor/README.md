@@ -124,9 +124,10 @@ and rejects any version other than 02.12.04, including unrecognized output.
 The catalog's `sen2cor_version` field records this checked version. Server-side
 string filters use `source_datapoint_id` and `pipeline_version`; the schema uses
 Tilebox's two available queryable string fields for those lookups.
-Pipeline version `sen2cor-02.12.04-ndvi-v2` does not reuse completion records from
-v1, where the processor version was not checked. Existing v1 catalog rows remain
-unchanged; the notebook filters for the current pipeline version.
+Pipeline version `sen2cor-02.12.04-ndvi-v3` stores all output locations as assets.
+It does not reuse v1 or v2 completion records. Create a fresh dataset when upgrading
+from those schemas; existing rows remain unchanged. The notebook filters for the
+current pipeline version.
 Without `RESULTS_STORAGE_URL`, native runs write to
 `./outputs/results`. For macOS/Windows use the container; Apple Silicon requires
 Linux/amd64 emulation and may be substantially slower. This is not a native ARM
@@ -139,6 +140,12 @@ distribution, verifies its SHA-256, and runs the worker as an unprivileged user.
 Python dependencies are locked in `uv.lock`. The worker executes one task at a time.
 Start with 8 vCPU, 32 GiB RAM, and 256 GiB disk; measure a representative scene
 before changing capacity. Scratch data is deleted when the task finishes.
+
+The execution context logger records selection counts and each scene's source ID,
+download, correction, derivation, publication, and catalog registration. Stage
+completion messages include elapsed seconds. Retries log when they reuse completed
+outputs instead of downloading and processing again. Use `--max-scenes 3` when
+submitting a job to process up to three matching scenes.
 
 | Variable | Purpose |
 | --- | --- |
@@ -211,14 +218,15 @@ local disk or Azure, then displays both. NDVI runs in the workflow so
 every registered product has a reusable result; the notebook only reads it.
 
 The catalog records acquisition time, footprint, source datapoint ID, processor
-and pipeline versions, SAFE prefix, metadata URL, NDVI URL, and the RGB image URL.
+and pipeline versions. Output locations appear only in `assets`: `product` for the
+SAFE directory, `metadata` for its XML, `ndvi` for the COG, and `rgb` for the image.
 The RGB image is for notebook display; it is not registered as a thumbnail asset
 because the Console cannot read the worker's local filesystem. Azure Console
 previews are also outside this example's scope. The asset schema's `authentication`
 field does not configure credentials: the worker and notebook access Azure through
 obstore, independently of Tilebox's storage client. URLs contain no SAS tokens.
-The notebook authenticates explicitly for Azure. `product_url` is a directory/blob
-prefix, not an HTTP directory listing or downloadable ZIP.
+The notebook authenticates explicitly for Azure. The `product` asset points to a
+directory/blob prefix, not an HTTP directory listing or downloadable ZIP.
 
 ## Retry behavior and storage
 

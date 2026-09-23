@@ -65,10 +65,27 @@ def publish(store: ObjectStore, base_url: str, source_id: str, product: Path, nd
         "source_datapoint_id": source_id,
         "pipeline_version": PIPELINE_VERSION,
         "sen2cor_version": SEN2COR_VERSION,
-        "product_url": f"{base_url}/{quote(prefix + '/' + product.name, safe='/')}/",
-        "metadata_url": f"{base_url}/{quote(prefix + '/' + product.name, safe='/')}/MTD_MSIL2A.xml",
-        "ndvi_url": upload(ndvi, "ndvi.tif"),
-        "thumbnail_url": upload(thumbnail, "thumbnail.png"),
+        "assets": {
+            "product": {
+                "href": f"{base_url}/{quote(prefix + '/' + product.name, safe='/')}/",
+                "roles": ["data"],
+            },
+            "metadata": {
+                "href": f"{base_url}/{quote(prefix + '/' + product.name, safe='/')}/MTD_MSIL2A.xml",
+                "media_type": "application/xml",
+                "roles": ["metadata"],
+            },
+            "ndvi": {
+                "href": upload(ndvi, "ndvi.tif"),
+                "media_type": "image/tiff; application=geotiff; profile=cloud-optimized",
+                "roles": ["data"],
+            },
+            "rgb": {
+                "href": upload(thumbnail, "thumbnail.png"),
+                "media_type": "image/png",
+                "roles": ["visual"],
+            },
+        },
     }
     try:
         obs.put(
