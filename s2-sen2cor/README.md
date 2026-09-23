@@ -203,9 +203,12 @@ local disk or Azure, then displays both. NDVI runs in the workflow so
 every registered product has a reusable result; the notebook only reads it.
 
 The catalog records acquisition time, footprint, source datapoint ID, processor
-and pipeline versions, SAFE prefix, metadata URL, NDVI URL, and thumbnail asset.
-URLs contain no SAS tokens. Private thumbnails require authenticated access;
-registering a thumbnail does not make anonymous browser/Console previews work.
+and pipeline versions, SAFE prefix, metadata URL, NDVI URL, and the RGB image URL.
+The RGB image is for notebook display; it is not registered as a thumbnail asset
+because the Console cannot read the worker's local filesystem. Azure Console
+previews are also outside this example's scope. The asset schema's `authentication`
+field does not configure credentials: the worker and notebook access Azure through
+obstore, independently of Tilebox's storage client. URLs contain no SAS tokens.
 The notebook authenticates explicitly for Azure. `product_url` is a directory/blob
 prefix, not an HTTP directory listing or downloadable ZIP.
 

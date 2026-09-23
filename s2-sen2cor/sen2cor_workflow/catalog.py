@@ -22,6 +22,7 @@ def create_catalog(code_name: str):
             *[{"name": name, "type": str} for name in ("product_url", "metadata_url", "ndvi_url", "thumbnail_url")],
             {"name": "assets", "type": Assets},
             {"name": "storage", "type": Storage},
+            # Asset schema metadata does not configure storage-client credentials.
             {"name": "authentication", "type": Authentication},
         ],
         name="Sentinel-2 Sen2Cor results",
@@ -41,12 +42,6 @@ def metadata_row(source: xr.Dataset, record: dict) -> xr.Dataset:
                 roles=frozenset({"data"}),
             ),
             Asset(
-                key="thumbnail",
-                primary=AssetLocation(href=record["thumbnail_url"]),
-                media_type="image/png",
-                roles=frozenset({"thumbnail"}),
-            ),
-            Asset(
                 key="metadata",
                 primary=AssetLocation(href=record["metadata_url"]),
                 media_type="application/xml",
@@ -54,14 +49,13 @@ def metadata_row(source: xr.Dataset, record: dict) -> xr.Dataset:
             ),
         ]
     ).to_fields()
-    return xr.Dataset(
-        {
-            "geometry": ("time", np.array([source.geometry.item()], dtype=object)),
-            **{name: ("time", [value]) for name, value in record.items()},
-            **{name: ("time", np.array([value], dtype=object)) for name, value in assets.items()},
-        },
-        coords={"time": [source.time.values]},
-    )
+    fields = {"geometry": ("time", np.array([source.geometry.item()], dtype=object))}
+    for name, value in record.items():
+        fields[name] = ("time", [value])
+    for name, value in assets.items():
+        # Keep each nested asset field as one object in the single-row dataset.
+        fields[name] = ("time", np.array([value], dtype=object))
+    return xr.Dataset(fields, coords={"time": [source.time.values]})
 
 
 def register(dataset_slug: str, source: xr.Dataset, record: dict):
