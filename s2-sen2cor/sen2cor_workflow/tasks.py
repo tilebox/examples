@@ -134,7 +134,7 @@ class ProcessScene(Task):
             )
             register(os.environ["RESULTS_DATASET"], source, record)
             context.logger.info(
-                "L2A result registered",
+                f"L2A result registered; NDVI: {record['assets']['ndvi']['href']}",
                 source_id=self.source_id,
                 product=record["title"],
                 seconds=round(monotonic() - started, 2),

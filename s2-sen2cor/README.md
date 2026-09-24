@@ -112,6 +112,8 @@ small: this limit bounds processing, not the initial catalog query.
 Follow the job in the Console. Context logs record selection counts, source IDs,
 processing stages, elapsed seconds, and reuse on retry. Docker's console formatter
 shows message text; structured fields are retained in Tilebox's API logs.
+The final `L2A result registered; NDVI: file:///.../ndvi.tif` message gives the
+stored file's location directly in the worker terminal.
 Wait for the job to complete before querying results or stopping the worker with
 Ctrl-C. Scene tasks retry twice on failure.
 
@@ -129,6 +131,15 @@ Run the notebook cells. Its default dates and bounds match the example job;
 change them if you submitted a different query. It queries the catalog, downloads
 one result's NDVI and RGB assets, and displays them. NDVI is computed by the
 workflow, not the notebook.
+
+The notebook lists every matching NDVI asset URI, then prints
+`Local NDVI copy: /absolute/path/outputs/<result-id>/ndvi.tif` for the displayed
+result. That is a local GeoTIFF you can open in QGIS or read with Rasterio.
+The original files remain under `outputs/results`; to list them from the terminal:
+
+```bash
+find "$PWD/outputs/results" -name ndvi.tif -type f
+```
 
 Each catalog row retains the source time, footprint, ID, and processor/pipeline
 versions. All output locations are in `assets`: `product` (SAFE directory),
