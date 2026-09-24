@@ -15,6 +15,7 @@ from pathlib import Path
 from textwrap import fill
 
 import matplotlib.pyplot as plt
+import numpy as np
 import rasterio
 from IPython.display import Image, display
 from shapely.geometry import box
@@ -53,9 +54,13 @@ display(Image(filename=str(output_dir / "thumbnail.png")))
 with rasterio.open(output_dir / "ndvi.tif") as source:
     # Read an overview for display, rather than a full 10980 × 10980 tile.
     values = source.read(1, out_shape=(800, 800), masked=True)
+# Stretch the display only; exclude nodata and clip the outer 2% at each end.
+vmin, vmax = np.percentile(values.compressed(), [2, 98]) if values.count() else (-1, 1)
+if vmin == vmax:
+    vmin, vmax = -1, 1
 fig, ax = plt.subplots(figsize=(8, 7))
-image = ax.imshow(values, cmap="RdYlGn", vmin=-1, vmax=1)
+image = ax.imshow(values, cmap="RdYlGn", vmin=vmin, vmax=vmax)
 ax.set_title(fill(str(scene.title.item()), width=55))
 ax.set_axis_off()
-fig.colorbar(image, ax=ax, label="NDVI (B08 − B04) / (B08 + B04)")
+fig.colorbar(image, ax=ax, extend="both", label="NDVI (2nd–98th percentile display stretch)")
 plt.show()

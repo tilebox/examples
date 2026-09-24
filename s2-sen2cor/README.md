@@ -129,7 +129,8 @@ uv run --group notebook --env-file .env jupyter lab query_results.ipynb
 Run the notebook cells. Its default dates and bounds match the example job;
 change them if you submitted a different query. It queries the catalog, downloads
 one result's NDVI and RGB assets, and displays them. NDVI is computed by the
-workflow, not the notebook.
+workflow, not the notebook. The plot stretches its colors between the 2nd and
+98th percentiles of valid displayed pixels; the stored NDVI values are unchanged.
 
 The notebook lists every matching NDVI asset URI, then prints
 `Local NDVI copy: /absolute/path/outputs/<result-id>/ndvi.tif` for the displayed
