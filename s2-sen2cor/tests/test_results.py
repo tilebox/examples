@@ -166,7 +166,8 @@ def test_laptop_task_publishes_then_retries_catalog_without_reprocessing(files, 
     assert messages.count("Running Sen2Cor") == 1
     assert messages.count("Reusing completed result") == 1
     assert messages.count("Registering L2A metadata") == 2
-    assert messages.count("L2A result registered") == 1
+    ndvi_href = register.call_args.args[2]["assets"]["ndvi"]["href"]
+    assert messages.count(f"L2A result registered; NDVI: {ndvi_href}") == 1
     cdse.assert_called_once_with(
         access_key="test-cdse-access", secret_access_key="test-cdse-secret", cache_directory=None
     )
