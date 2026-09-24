@@ -63,9 +63,12 @@ uv run --env-file .env create_catalog.py sen2cor_test
 
 Use an unused code name for a test run. The script creates the dataset and its
 `L2A` collection; if the name exists, it updates that dataset's schema.
-Copy the dataset's full slug, including its workspace prefix, from the command
-output or Console into `RESULTS_DATASET` in `.env`. Do this once, before starting
-the worker. Use separate datasets for laptop and Azure results.
+Copy the dataset's full slug, including your organization prefix, from the Console
+into `RESULTS_DATASET` in `.env` (for example, `your-org.sen2cor_test`, not
+`tilebox.sen2cor_test`). The script does not print the slug. If you have
+the Tilebox CLI installed, `uv run --env-file .env tilebox dataset list` also
+lists dataset slugs. Do this once, before starting the worker. Use separate
+datasets for laptop and Azure results.
 
 ## 3. Start the worker
 
@@ -135,7 +138,23 @@ workflow, not the notebook.
 The notebook lists every matching NDVI asset URI, then prints
 `Local NDVI copy: /absolute/path/outputs/<result-id>/ndvi.tif` for the displayed
 result. That is a local GeoTIFF you can open in QGIS or read with Rasterio.
-The original files remain under `outputs/results`; to list them from the terminal:
+The original files remain under `outputs/results`.
+
+To query the catalog from the terminal, install the
+[Tilebox CLI](https://docs.tilebox.com/agents-and-ai-tools/tilebox-cli) and
+[jq](https://jqlang.org/download/), then run:
+
+```bash
+uv run --env-file .env sh -c 'tilebox dataset query "$RESULTS_DATASET" \
+  --collections L2A --after 2025-08-01 --before 2025-09-01 --limit 100 --json' \
+  | jq -r '.datapoints[].assets | . as $a | .assets[] | select(.key == "ndvi") |
+    $a.access_profiles[.primary.access_profile_index].base_href + .primary.href'
+```
+
+This lists NDVI asset URIs for up to 100 results in the example month, whether
+stored locally or in Azure. The CLI returns each URI as a base and relative path;
+`jq` joins them. The inner shell reads `RESULTS_DATASET` from `.env`.
+Omit the pipe to inspect complete catalog records. To list files on disk instead:
 
 ```bash
 find "$PWD/outputs/results" -name ndvi.tif -type f
