@@ -1,15 +1,19 @@
 [project]
 name = "s2-sen2cor"
 version = "0.1.0"
-description = "Sentinel-2 atmospheric correction, NDVI and a Tilebox results catalog"
+description = "Scene-parallel Sen2Cor atmospheric correction with Tilebox"
 requires-python = ">=3.12"
 dependencies = [
   "tilebox>=0.1.0",
   "tilebox-datasets>=0.61.0",
   "tilebox-storage",
-  "azure-identity>=1.25.0",
-  "obstore>=0.11.1,<0.12",
+  "cyclopts>=4.0",
+  "python-dotenv>=1.0",
+  "tqdm>=4.0",
+  "niquests>=3.15",
   "numpy>=2.2.0",
+  "xarray",
+  "shapely",
   "rasterio>=1.4.3",
   "pillow>=11.3.0",
   "defusedxml>=0.7.1",
@@ -21,11 +25,22 @@ dev = [
     "ruff>=0.12.7",
     "ty>=0.0.84",
 ]
-notebook = ["jupyterlab>=4.4", "matplotlib>=3.10", "jupytext>=1.17"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["atmospheric_correction"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.uv]
+# Keep Niquests' transport from overwriting Requests' urllib3 files.
+no-binary-package = ["urllib3-future"]
+extra-build-variables = { urllib3-future = { URLLIB3_NO_OVERRIDE = "1" } }
 
 [tool.ruff]
 # settings applying to all ruff subcommands, such as `ruff check` (lint) and `ruff format`

@@ -1,232 +1,226 @@
-# Sentinel-2 atmospheric correction on a laptop
+# Scene-parallel atmospheric correction
 
-Query Sentinel-2 L1C imagery with Tilebox, download it from Copernicus Data Space
-(CDSE), and run Sen2Cor 02.12.04 in Docker. Each scene produces an L2A SAFE product,
-a masked 10 m NDVI Cloud-Optimized GeoTIFF (COG), and an RGB image. Files stay on
-your disk; their metadata and asset locations go into a custom Tilebox dataset.
+Wrap the existing Sen2Cor command-line processor in a Tilebox workflow. Tilebox
+selects Sentinel-2 L1C scenes, schedules an independent task for each scene, and
+provides retries, progress, logs, and tracing. Each scene produces a 20 m L2A SAFE
+and a catalog record with a publicly accessible RGB preview.
 
-The workflow processes full tiles, not crops of the selected area. It needs an
-internet connection for CDSE, the Tilebox catalog, and workflow orchestration.
-No Azure account is needed for the steps below.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="assets/architecture-dark.png">
+  <img src="assets/architecture-light.png" alt="CDSE hosts Sentinel-2 L1C SAFE data indexed by open_data.copernicus.sentinel2_msi. ProcessArea queries that catalog and fans out ProcessScene tasks, each downloading a SAFE, running Sen2Cor, writing assets to output storage, and ingesting metadata into tilebox.sentinel2_l2a.">
+</picture>
 
-## 1. Set up credentials
+Each scene task runs the Sen2Cor binary embedded in the worker image. Output
+storage can be Tilebox hosted or a private bucket in this architecture; this demo
+uploads only the RGB preview to Tilebox hosted storage. Full SAFE products remain
+local, with explicitly marked placeholder bucket URLs in the results catalog.
 
-Install [Docker](https://docs.docker.com/get-started/get-docker/) and
-[uv](https://docs.astral.sh/uv/getting-started/installation/). Run all commands
-from this `s2-sen2cor` directory in Bash (use WSL on Windows).
-The worker processes one scene at a time. Our three-tile test peaked at about
-12 GiB RAM; allow headroom for other scenes and disk space for the image, scratch
-files, and results. Apple Silicon uses amd64 emulation and may be slower.
+There is no aggregation barrier: each scene publishes independently. The expected
+graph is one root task plus N scene tasks. Each worker runs one task at a time;
+start multiple workers on the same cluster to process scenes concurrently.
 
-You need:
+## Setup
 
-- A Tilebox API key with access to the Copernicus dataset and Default workflow
-  cluster, plus permission to create a dataset and ingest results.
-- The Default cluster's full slug from the [Tilebox Console](https://console.tilebox.com).
-  Copy the slug, not the display name `Default` or the literal string `default`.
-- CDSE S3 keys from the [credentials manager](https://eodata-s3keysmanager.dataspace.copernicus.eu/).
-  Sign in, choose **Add Credentials**, set an expiry, and save the secret when
-  shown. These are S3 keys, not your CDSE password. See
-  [CDSE registration](https://documentation.dataspace.copernicus.eu/Registration.html)
-  if you need an account.
-
-Create a private environment file:
-
-```bash
-touch .env
-chmod 600 .env
-```
-
-Edit `.env` with these values, one per line. Leave `RESULTS_DATASET` empty for now:
+Install Docker and uv. Run commands from this directory. Create a private `.env`
+file (`cp .env.example .env`) containing:
 
 ```dotenv
 TILEBOX_API_KEY=your-api-key
-TILEBOX_CLUSTER=your-default-cluster-slug
+TILEBOX_CLUSTER=cluster-slug, or leave empty for default cluster
 CDSE_ACCESS_KEY=your-s3-access-key
 CDSE_SECRET_KEY=your-s3-secret-key
-RESULTS_DATASET=
 ```
 
-Git ignores `.env`. Keep it private; Docker administrators can read container
-environment variables.
+Get CDSE **S3 keys**, not your account password, from the
+[credentials manager](https://eodata-s3keysmanager.dataspace.copernicus.eu/).
+The Tilebox key needs access to the source dataset, destination dataset, workflow
+cluster, and prototype hosted storage. `TILEBOX_API_URL` optionally selects the
+development API; hosted preview URLs use the matching `.com` or `.dev` service.
 
-## 2. Create the results dataset
+Install dependencies and manually create the destination catalog:
 
 ```bash
 uv sync --locked
-uv run --env-file .env create_catalog.py sen2cor_test
+uv run scripts/catalog.py create --name "sentinel2_l2a" --collection S2A_L2A
 ```
 
-Use an unused code name for a test run. The script creates the dataset and its
-`L2A` collection; if the name exists, it updates that dataset's schema.
-Copy the dataset's full slug, including your organization prefix, from the Console
-into `RESULTS_DATASET` in `.env` (for example, `your-org.sen2cor_test`, not
-`tilebox.sen2cor_test`). The script does not print the slug. If you have
-the Tilebox CLI installed, `uv run --env-file .env tilebox dataset list` also
-lists dataset slugs. Do this once, before starting the worker. Use separate
-datasets for laptop and Azure results.
+The schema lives in `atmospheric_correction/catalog.py`. The `create` command
+creates or updates it only when explicitly run; the workflow never creates datasets.
+Use the actual organization-qualified slug in submission commands below. All Python
+CLIs load `.env` automatically without overriding existing environment variables.
+Submission uses the default cluster when `TILEBOX_CLUSTER` is unset or empty.
 
-## 3. Start the worker
+To delete all datapoints from a collection while retaining its schema and files:
+
+```bash
+uv run scripts/catalog.py empty --dataset tilebox.sentinel2_l2a --collection S2A_L2A
+```
+
+**`empty` deletes immediately and permanently.** Stop jobs ingesting into that
+collection before running it.
+
+## Run and observe
+
+For a live demo, [warm the cache](#prepare-a-fast-demo) before starting the worker.
+Run both the preparation scripts and the following commands from `s2-sen2cor`.
 
 ```bash
 docker build --platform linux/amd64 -t s2-sen2cor:local .
-mkdir -p outputs/results
-```
-
-On Linux, make the result directory writable by the container's UID 10001:
-
-```bash
-sudo chown 10001:10001 outputs/results
-```
-
-On Docker Desktop, allow sharing of this directory. Then start the worker:
-
-```bash
-export RESULTS_STORAGE_URL="$(uv run python -c 'from pathlib import Path; print(Path("outputs/results").resolve().as_uri())')"
+mkdir -p outputs
 docker run --rm --platform linux/amd64 --env-file .env \
-  -e RESULTS_STORAGE_URL \
-  -v "$PWD/outputs:$PWD/outputs" \
-  s2-sen2cor:local
+  --workdir /app -v "$PWD/outputs:/app/outputs" s2-sen2cor:local
 ```
 
-Leave this terminal running. The mount uses the same absolute path inside and
-outside Docker so the notebook can read the cataloged `file://` assets. Those
-paths work only on machines that can access that directory.
+The scripts and worker both resolve `outputs/cache` relative to their working
+directory. This bind mount shares the **same files**, with these paths:
 
-## 4. Submit a job
+| Host (from this directory) | Container |
+| --- | --- |
+| `$PWD/outputs/cache` | `/app/outputs/cache` |
+| `$PWD/outputs/results` | `/app/outputs/results` |
 
-Open a second terminal in `s2-sen2cor`. Check that no other worker on the Default
-cluster runs these task classes with different settings or storage paths.
+Do not mount `outputs` at `/outputs` or change the container working directory;
+the worker would then look in a different cache. No identical host/container
+absolute paths are required because catalog previews use HTTPS, not local paths.
+
+On Linux, after warming the cache and before `docker run`, make the mounted tree
+writable by the container's UID 10001: `sudo chown -R 10001:10001 outputs`.
+This changes ownership of the local demo cache and results. On Docker Desktop,
+allow sharing of this directory. Apple Silicon uses amd64 emulation. Correction
+is CPU- and memory-intensive: the previous 10 m test peaked around 12 GiB with
+one scene at a time; the 20 m version has not yet been benchmarked. Add workers
+only when the machine has enough capacity.
+
+In another terminal, submit up to three low-cloud scenes:
 
 ```bash
-uv run --env-file .env submit.py --start 2025-08-01 --end 2025-09-01 \
-  --bounds 54.2 24.2 54.6 24.6 --max-scenes 1
+uv run --env-file .env scripts/submit.py \
+  --start 2025-08-01 --end 2025-09-01 \
+  --bounds 54.2 24.2 54.6 24.6 \
+  --source open_data.copernicus.sentinel2_msi S2A_S2MSI1C \
+  --destination tilebox.sentinel2_l2a S2A_L2A \
+  --max-scenes 3
 ```
 
-This selects the earliest matching Sentinel-2A scene near Abu Dhabi with cloud
-cover ≤20%. Bounds are west, south, east, north in WGS84; the end date is exclusive.
-Use `--max-scenes 3` to process up to three scenes. Keep the area and date range
-small: this limit bounds processing, not the initial catalog query.
+Source and destination are each a `(dataset_slug, collection_name)` tuple. Bounds
+are west, south, east, north; end is exclusive. Cloud cover defaults to ≤20% and
+is filtered locally because the source catalog does not expose a server-side
+cloud filter. Keep the query interval and area small: `max_scenes` limits processing,
+not the initial catalog query. Bounds select full tiles; they do not crop imagery.
 
-Follow the job in the Console. Context logs record selection counts, source IDs,
-processing stages, elapsed seconds, and reuse on retry. Docker's console formatter
-shows message text; structured fields are retained in Tilebox's API logs.
-The final `L2A result registered; NDVI: file:///.../ndvi.tif` message gives the
-stored file's location directly in the worker terminal.
-Wait for the job to complete before querying results or stopping the worker with
-Ctrl-C. Scene tasks retry twice on failure.
+Open the job in the Tilebox Console to see scene fan-out and progress. Each scene
+has `download-l1c`, `sen2cor-20m`, `upload-rgb`, and `ingest-l2a` spans, plus logs
+with the source ID, output location, preview URL, and total elapsed time.
 
-## 5. View the results
+## Results and demo storage
 
-Run the notebook on the same machine, with access to `outputs`:
+- Full L2A products stay under `outputs/results/<job-id>/<source-id>/*.SAFE`.
+- A 512-pixel-wide `rgb.png` is generated from Sen2Cor's 20 m TCI and uploaded
+  through the same prototype hosted-storage API used by `seasonal-timelapse`.
+- The destination dataset retains the acquisition time, footprint, source ID,
+  processor/pipeline versions, and canonical `assets` and `storage` fields.
+- The `rgb` asset has a real public HTTPS URL and `visual`/`thumbnail` roles.
+- Every file inside the generated SAFE has an asset entry keyed by its relative
+  path, pointing to **invented** `s3://output-bucket/<product>/<file>` locations.
+  Their storage scheme explicitly says these files were not uploaded. Do not
+  try to download these placeholder assets; use the local SAFE instead.
+
+Only the RGB preview is uploaded. There is no NDVI, Azure configuration, full-SAFE
+upload, or completion-record system. Hosted previews are public; do not upload
+sensitive imagery through this demo endpoint.
+
+List preview URLs:
 
 ```bash
-uv sync --group notebook --locked
-uv run --group notebook jupytext --to notebook query_results.py
-uv run --group notebook --env-file .env jupyter lab query_results.ipynb
+uv run --env-file .env scripts/query_results.py \
+  --start 2025-08-01 --end 2025-09-01 \
+  --destination tilebox.sentinel2_l2a S2A_L2A
 ```
 
-Run the notebook cells. Its default dates and bounds match the example job;
-change them if you submitted a different query. It queries the catalog, downloads
-one result's NDVI and RGB assets, and displays them. NDVI is computed by the
-workflow, not the notebook. The plot stretches its colors between the 2nd and
-98th percentiles of valid displayed pixels; the stored NDVI values are unchanged.
+## Prepare a fast demo
 
-The notebook lists every matching NDVI asset URI, then prints
-`Local NDVI copy: /absolute/path/outputs/<result-id>/ndvi.tif` for the displayed
-result. That is a local GeoTIFF you can open in QGIS or read with Rasterio.
-The original files remain under `outputs/results`.
-
-To query the catalog from the terminal, install the
-[Tilebox CLI](https://docs.tilebox.com/agents-and-ai-tools/tilebox-cli) and
-[jq](https://jqlang.org/download/), then run:
+The full L1C SAFE is cached under `outputs/cache`. Subsequent downloads reuse
+existing files through the storage SDK. First preview the scenes the root task
+would select:
 
 ```bash
-uv run --env-file .env sh -c 'tilebox dataset query "$RESULTS_DATASET" \
-  --collections L2A --after 2025-08-01 --before 2025-09-01 --limit 100 --json' \
-  | jq -r '.datapoints[].assets | . as $a | .assets[] | select(.key == "ndvi") |
-    $a.access_profiles[.primary.access_profile_index].base_href + .primary.href'
+uv run scripts/query_scenes.py \
+  --start 2025-08-01 --end 2025-09-01 \
+  --bounds 54.2 24.2 54.6 24.6 --max-scenes 3 --max-cloud-cover 20
 ```
 
-This lists NDVI asset URIs for up to 100 results in the example month, whether
-stored locally or in Azure. The CLI returns each URI as a base and relative path;
-`jq` joins them. The inner shell reads `RESULTS_DATASET` from `.env`.
-Omit the pipe to inspect complete catalog records. To list files on disk instead:
+Defaults match the README submission example. Override `--start`, `--end`,
+`--bounds`, `--max-scenes`, or `--max-cloud-cover` to match your job; use
+`--dataset` and `--collection` to choose its source. The script prints the selected
+scene IDs and a ready-to-run download command. It only queries metadata.
+
+Copy and run that command to warm the cache, or supply known IDs directly:
 
 ```bash
-find "$PWD/outputs/results" -name ndvi.tif -type f
+uv run scripts/download_scenes.py SCENE_ID_1 SCENE_ID_2 \
+  --dataset open_data.copernicus.sentinel2_msi --collection S2A_S2MSI1C
 ```
 
-Each catalog row retains the source time, footprint, ID, and processor/pipeline
-versions. All output locations are in `assets`: `product` (SAFE directory),
-`metadata` (XML), `ndvi` (COG), and `rgb` (image). The SAFE asset is a directory
-prefix, not a ZIP. RGB is for notebook display; no Console thumbnail is registered
-because the Console cannot read your filesystem.
+The command downloads sequentially with a tqdm progress bar and prints IDs,
+granule names, and cache paths.
 
-## Processing assumptions and retries
+Wait for downloads to finish, then start the Docker worker using the bind mount
+above and submit the job with the same dates, bounds, source, and selection limits.
+Existing SAFE files will be reused; catalog requests and source file listings
+still require network access. This example does not coordinate simultaneous
+downloads of the same scene into a shared cache. Separate machines have separate
+caches unless you arrange a shared mount.
 
-Sen2Cor converts L1C top-of-atmosphere reflectance to L2A surface reflectance.
-The image verifies the official installer checksum and uses Sen2Cor's default
-configuration without an external DEM or ESA CCI land-cover data. Results may
-differ from official Copernicus L2A. See
-[ESA's configuration guidance](https://step.esa.int/main/snap-supported-plugins/sen2cor/sen2cor-v2-12/)
-before production use.
+After the job completes, query the output catalog:
 
-NDVI uses 10 m B08 (NIR) and B04 (red), with offsets and scale from `MTD_MSIL2A.xml`:
+```bash
+uv run scripts/query_results.py \
+  --start 2025-08-01 --end 2025-09-01 \
+  --destination tilebox.sentinel2_l2a S2A_L2A
+```
+
+`query_scenes.py` selects **inputs**, `download_scenes.py` warms their cache, and
+`query_results.py` prints hosted RGB URLs for **completed outputs**. Querying
+results does not warm the L1C cache.
+
+Scene tasks retry twice. A retry reuses input files but replaces that job/scene's
+local output and reruns correction. The content-addressed RGB upload and
+`ingest(..., allow_existing=True)` permit reuse of identical results; this is not
+an exactly-once publication system. Avoid overlapping attempts for the same scene.
+
+Sen2Cor 02.12.04 is pinned in Docker. Processing uses 20 m resolution and explicitly
+disables optional 60 m downsampling, otherwise retaining the installed default
+configuration (no external DEM or ESA CCI data). Results can differ from official
+Copernicus L2A. Native Linux x86_64 users can install the same Sen2Cor release and
+run `uv run --env-file .env runner.py` instead of Docker.
+
+## Code and offline checks
 
 ```text
-reflectance = (DN + BOA_ADD_OFFSET) / BOA_QUANTIFICATION_VALUE
-NDVI = (NIR − red) / (NIR + red)
+atmospheric_correction/
+    tasks.py          # selection, scene fan-out, stage spans, ingestion
+    processing.py     # Sen2Cor invocation and RGB preview
+    catalog.py        # schema, hosted upload, and output asset metadata
+scripts/
+    catalog.py        # create dataset or empty a collection
+    submit.py         # job submission
+    query_scenes.py   # preview input selection and print download command
+    download_scenes.py # optional multi-scene cache preparation
+    query_results.py  # preview URL lookup
+tests/
+runner.py             # task registration and worker entrypoint
 ```
 
-Missing offsets default to zero. DN=0, negative reflectance, zero denominators,
-and scene-classification (SCL) classes other than 4, 5, or 6 (vegetation, bare soil,
-water) become nodata (-9999). The 20 m SCL layer is resampled by nearest-neighbor
-onto the 10 m grid. The full SAFE remains available
-for other masks or calculations; the RGB image is not a cloud mask.
-
-After uploading all files, a task writes a completion record, then registers the
-metadata. Retries reuse that record without downloading or correcting again.
-Concurrent attempts use separate paths; the first completed attempt wins.
-Failed or losing attempts can leave unreferenced files. Clean them by comparing
-attempt paths with completion records after jobs finish; never expire the entire
-`attempts/` directory, which also contains successful results. Scratch files are
-removed on task exit, but may survive a hard crash. Partial Sen2Cor runs restart
-from the beginning.
-
-Increment `PIPELINE_VERSION` and rebuild when changing processing code,
-configuration, or auxiliary data. The current `sen2cor-02.12.04-ndvi-v3` schema
-uses assets only and does not reuse v1/v2 records. Use a fresh dataset when
-upgrading from those schemas. The notebook filters for the current version.
-
-## Other execution options
-
-**Native Linux x86_64:** Install
-[Sen2Cor 02.12.04](https://step.esa.int/main/snap-supported-plugins/sen2cor/sen2cor-v2-12/)
-with its unmodified default GIPP configuration and put `L2A_Process` on `PATH`.
-Run `uv run --env-file .env runner.py`. The worker checks the executable's version
-before processing and rejects anything other than 02.12.04. Native runs default
-to `outputs/results`; set `WORK_DIR` to choose a scratch directory.
-
-**Azure Blob Storage:** The same code uses obstore for local and Azure result
-writes, completion records, and notebook reads. Set `RESULTS_STORAGE_URL` to
-`https://<account>.blob.core.windows.net/<container>` and provide an identity
-supported by `DefaultAzureCredential`. Workers need Storage Blob Data Contributor;
-notebook users need Storage Blob Data Reader. A host notebook can use `az login`.
-Containers do not inherit that login: supply service-principal or workload-identity
-credentials, or use host networking on an Azure VM to reach managed identity.
-Set `AZURE_CLIENT_ID` when selecting a user-assigned identity. Keep secrets out of
-the image and URLs. Tilebox asset metadata does not configure authentication;
-obstore handles it separately. Azure Console previews are outside this example.
-
-## Local checks
+All CLIs use Cyclopts and support `--help`.
 
 ```bash
 uv run pytest -q
 uv run ruff check .
 uv run ruff format --check .
+uv run ty check
 ```
 
-Tests cover NDVI masks and offsets, raster output, asset reads, concurrent writes,
-and retries. Before scaling, run a real scene and check its SAFE output, NDVI,
-catalog row, and notebook reads with your credentials.
+Tests use synthetic rasters and mock subprocess/API calls. They do not run
+Sen2Cor, upload imagery, create datasets, or submit jobs. A manual scene run is
+still needed to verify the processor, hosted upload, catalog preview, and actual
+task graph together.

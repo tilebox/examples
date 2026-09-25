@@ -1,1 +1,1 @@
-"""Tests for the Sen2Cor workflow."""
+"""Offline checks for processing, selection, and asset metadata."""

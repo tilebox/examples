@@ -19,13 +19,12 @@ COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /usr/local/bin/uv
 WORKDIR /app
 COPY pyproject.toml uv.lock ./
 RUN uv sync --frozen --no-dev --no-install-project
-COPY sen2cor_workflow/ ./sen2cor_workflow/
+COPY atmospheric_correction/ ./atmospheric_correction/
 COPY runner.py ./
-RUN mkdir /work && chown worker:worker /work
+RUN mkdir /app/outputs && chown worker:worker /app/outputs
 ENV PATH="/app/.venv/bin:/opt/sen2cor/bin:$PATH" \
-    WORK_DIR=/work \
     PYTHONUNBUFFERED=1
 USER worker
 RUN L2A_Process --help >/dev/null \
-    && python -c 'import runner; import rasterio; from pathlib import Path; import os; assert os.getuid() == 10001; assert os.access("/work", os.W_OK); assert (Path.home() / "sen2cor/2.12/cfg/L2A_GIPP.xml").is_file()'
+    && python -c 'import runner; import rasterio; from pathlib import Path; assert (Path.home() / "sen2cor/2.12/cfg/L2A_GIPP.xml").is_file()'
 CMD ["python", "runner.py"]

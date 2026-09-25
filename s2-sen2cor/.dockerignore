@@ -3,5 +3,5 @@
 !pyproject.toml
 !uv.lock
 !runner.py
-!sen2cor_workflow/
-!sen2cor_workflow/*.py
+!atmospheric_correction/
+!atmospheric_correction/*.py
