@@ -1,0 +1,89 @@
+[project]
+name = "s2-sen2cor"
+version = "0.1.0"
+description = "Scene-parallel Sen2Cor atmospheric correction with Tilebox"
+requires-python = ">=3.12"
+dependencies = [
+  "tilebox>=0.1.0",
+  "tilebox-datasets>=0.61.0",
+  "tilebox-storage",
+  "cyclopts>=4.0",
+  "python-dotenv>=1.0",
+  "tqdm>=4.0",
+  "niquests>=3.15",
+  "numpy>=2.2.0",
+  "xarray",
+  "shapely",
+  "rasterio>=1.4.3",
+  "pillow>=11.3.0",
+  "defusedxml>=0.7.1",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.4.1",
+    "ruff>=0.12.7",
+    "ty>=0.0.84",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["atmospheric_correction"]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
+
+[tool.uv]
+# Keep Niquests' transport from overwriting Requests' urllib3 files.
+no-binary-package = ["urllib3-future"]
+extra-build-variables = { urllib3-future = { URLLIB3_NO_OVERRIDE = "1" } }
+
+[tool.ruff]
+# settings applying to all ruff subcommands, such as `ruff check` (lint) and `ruff format`
+line-length = 120
+target-version = "py312"
+exclude = [
+  "*/.venv/*",
+  # it's auto generated, don't lint it
+  "*/datasets/v1/*",
+  "*/datasets/stac/v1/*",
+  "*/workflows/v1/*",
+  "*/tilebox/v1/*",
+]
+
+[tool.ruff.lint]
+select = ["ALL"]
+# all rules: https://beta.ruff.rs/docs/rules
+ignore = [
+  # some ruff checking modules don't make much sense as a whole
+  "D",   # pydocstyle: pretty strict anyways
+  "FBT", # flake8-boolean-trap: boolean arguments can make sense
+  "COM", # flake8-commas: formatter takes care of this
+  "DTZ", # flake8-datetimez: utc datetimes are useful
+  "DJ",  # flake8-django: not needed
+  "EM",  # flake8-errmsg: str directly in Exception constructor is accetable
+  "TC",  # flake8-type-checking: type checking blocks are weird
+  # specific rules
+  "ANN401",  # any-type: allow Any in *args and **kwargs
+  "S101",    # assert: allow usage of assert
+  "B008",    # function-call-argument-default: some default argument values make sense to be function calls
+  "G004",    # logging-f-string: allow usage of f-strings in logging calls
+  "PLR2004", # magic-value-comparison: sometimes comparison with constants (e.g. 0) makes sense
+  "TRY003",  # raise-vanilla-args: exceptions like this make sense in python
+  "TRY400",  # error-instead-of-exception: logger.error is ok with loguru
+  "CPY001",  # missing-copyright-notice: we don't add copyright notices to our source files
+  # disabled because of formatter
+  "E501",   # line-too-long -> formatter takes care of this
+  "ISC001", # single-line-implicit-str-concatenation -> formatter takes care of this
+  "Q",      # flake8-quotes -> formatter takes care of this
+  "W191",   # tab-indentation -> formatter takes care of this
+]
+
+unfixable = [
+  "F841", # unused-variable -> don't remove them automatically
+  "ERA",  # eradicate -> (commented out code), don't remove it automatically
+]

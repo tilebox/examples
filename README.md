@@ -33,6 +33,8 @@ An example that submits native ODC Geo task inputs from Go for execution by an a
 A more complex example that demonstrates how to use the Tilebox SDKs to create a Workflows to find Sentinel-2 data for a set of points of interest (POIs), filter the data to be as cloud-free as possible and finally download the data.
 - [Sentinel-2 Cloud-free Mosaic](/s2-cloudfree-mosaic/)
 This workflow window-reads Sentinel-2 COGs from AWS Earth Search and writes a cloud-free mosaic to Zarr.
+- [Sentinel-2 Atmospheric Correction on a Laptop](/s2-sen2cor/)
+This workflow runs Sen2Cor on L1C imagery, stores L2A and NDVI locally, and catalogs the results for notebook queries.
 - [Sentinel-2 Clay Change Detection](/s2-clay/)
 This workflow composites two Sentinel-2 periods, runs tiled Clay inference, and writes embedding change distances.
 - [Wyvern Hyperspectral PCA](/wyvern-hyperspectral-pca/)
