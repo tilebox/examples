@@ -2,6 +2,7 @@ import os
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from time import monotonic
+from typing import cast
 
 from shapely.geometry import box
 from tilebox.datasets import Client
@@ -102,7 +103,8 @@ class ProcessScene(Task):
                     )
                     context.logger.info("Downloading L1C SAFE", source_id=self.source_id)
                     phase = monotonic()
-                    input_safe = storage.download(source, output_dir=root / "input", show_progress=False)
+                    # The sync client wraps download at runtime but retains its async type annotation.
+                    input_safe = cast(Path, storage.download(source, output_dir=root / "input", show_progress=False))
                     context.logger.info(
                         "L1C download complete", source_id=self.source_id, seconds=round(monotonic() - phase, 2)
                     )

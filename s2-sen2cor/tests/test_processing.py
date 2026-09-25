@@ -1,8 +1,11 @@
 import subprocess
+from pathlib import Path
+from typing import Never
 
 import numpy as np
 import pytest
 import rasterio
+from numpy.typing import NDArray
 from PIL import Image
 from rasterio.transform import from_origin
 
@@ -10,7 +13,7 @@ from sen2cor_workflow import processing
 from sen2cor_workflow.processing import NODATA, check_sen2cor_version, correct, derive, ndvi, reflectance_parameters
 
 
-def metadata(path, offsets=True):
+def metadata(path: Path, offsets: bool = True) -> None:
     """Write sample L2A metadata with optional band offsets."""
     path.write_text(
         '<n:Level2 xmlns:n="urn:test"><n:BOA_QUANTIFICATION_VALUE>10000</n:BOA_QUANTIFICATION_VALUE>'
@@ -24,7 +27,7 @@ def metadata(path, offsets=True):
     )
 
 
-def test_offsets_masks_and_unsigned_arithmetic():
+def test_offsets_masks_and_unsigned_arithmetic() -> None:
     """Check reflectance offsets, signed subtraction, and invalid-pixel masking."""
     red = np.array([2000, 5000, 0, 2000, 1000, 900, 2000], dtype=np.uint16)
     nir = np.array([4500, 1500, 4500, 4500, 500, 4500, 4500], dtype=np.uint16)
@@ -34,7 +37,7 @@ def test_offsets_masks_and_unsigned_arithmetic():
     np.testing.assert_allclose(actual, [0.6, -0.6, NODATA, NODATA, NODATA, NODATA, NODATA])
 
 
-def test_metadata_offsets_and_legacy(tmp_path):
+def test_metadata_offsets_and_legacy(tmp_path: Path) -> None:
     """Check present, absent, and incomplete band offsets in L2A metadata."""
     xml = tmp_path / "metadata.xml"
     metadata(xml)
@@ -49,7 +52,9 @@ def test_metadata_offsets_and_legacy(tmp_path):
         reflectance_parameters(xml)
 
 
-def test_correct_propagates_failure_and_rejects_incomplete_output(tmp_path, monkeypatch):
+def test_correct_propagates_failure_and_rejects_incomplete_output(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Check the Sen2Cor command, process errors, and missing output rejection."""
     monkeypatch.setattr(processing, "check_sen2cor_version", lambda: None)
     source = tmp_path / "input.SAFE"
@@ -57,7 +62,7 @@ def test_correct_propagates_failure_and_rejects_incomplete_output(tmp_path, monk
     (source / "MTD_MSIL1C.xml").touch()
     destination = tmp_path / "output"
 
-    def fail(command, **kwargs):
+    def fail(command: list[str], **kwargs: object) -> Never:
         """Validate the process arguments and simulate a Sen2Cor failure."""
         assert command == ["L2A_Process", str(source), "--output_dir", str(destination), "--resolution", "10"]
         assert kwargs == {"check": True, "timeout": 14400}
@@ -66,17 +71,19 @@ def test_correct_propagates_failure_and_rejects_incomplete_output(tmp_path, monk
     monkeypatch.setattr(subprocess, "run", fail)
     with pytest.raises(subprocess.CalledProcessError):
         correct(source, destination)
-    monkeypatch.setattr(subprocess, "run", lambda *args, **kwargs: None)
+    monkeypatch.setattr(subprocess, "run", lambda *_args, **_kwargs: None)
     with pytest.raises(RuntimeError, match="exactly one"):
         correct(source, destination)
 
 
 @pytest.mark.parametrize("version", ["02.12.04", "02.12.03", "unknown"])
-def test_processor_version_is_checked_before_correction(tmp_path, monkeypatch, version):
+def test_processor_version_is_checked_before_correction(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, version: str
+) -> None:
     """Accept the pinned release and reject wrong or missing versions before processing."""
     calls = []
 
-    def help_output(command, **kwargs):
+    def help_output(command: list[str], **kwargs: object) -> subprocess.CompletedProcess[str]:
         """Return processor help and reject any attempt to process a scene."""
         calls.append(command)
         assert command == ["L2A_Process", "--help"]
@@ -96,7 +103,7 @@ def test_processor_version_is_checked_before_correction(tmp_path, monkeypatch, v
     assert len(calls) == 1
 
 
-def test_derive_cog_georeferencing_and_scl_resampling(tmp_path):
+def test_derive_cog_georeferencing_and_scl_resampling(tmp_path: Path) -> None:
     """Check the NDVI grid, resampled mask, COG layout, and thumbnail pixels."""
     product = tmp_path / "test.SAFE"
     r10 = product / "GRANULE" / "tile" / "IMG_DATA" / "R10m"
@@ -105,7 +112,7 @@ def test_derive_cog_georeferencing_and_scl_resampling(tmp_path):
     r20.mkdir()
     metadata(product / "MTD_MSIL2A.xml")
 
-    def write(path, data, resolution):
+    def write(path: Path, data: NDArray[np.uint8] | NDArray[np.uint16], resolution: float) -> None:
         """Write a small georeferenced raster at the requested resolution."""
         with rasterio.open(
             path,

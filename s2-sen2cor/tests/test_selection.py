@@ -1,12 +1,13 @@
 from unittest.mock import MagicMock
 
 import numpy as np
+import pytest
 import xarray as xr
 
 from sen2cor_workflow import tasks
 
 
-def test_cloud_filter_precedes_scene_limit_and_does_not_use_server_filter(monkeypatch):
+def test_cloud_filter_precedes_scene_limit_and_does_not_use_server_filter(monkeypatch: pytest.MonkeyPatch) -> None:
     """Check local cloud filtering before sorting and limiting the selected scenes."""
     scenes = xr.Dataset(
         {"id": ("time", ["late", "cloudy", "early", "missing"]), "cloud_cover": ("time", [20.0, 20.1, 3.0, np.nan])},

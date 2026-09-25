@@ -1,4 +1,5 @@
 import json
+from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from urllib.parse import quote, unquote
@@ -14,7 +15,7 @@ from sen2cor_workflow.processing import PIPELINE_VERSION, SEN2COR_VERSION
 
 
 @contextmanager
-def open_store(url: str):
+def open_store(url: str) -> Iterator[ObjectStore]:
     """Open local storage without credentials or Azure storage with identity authentication."""
     if url.startswith("file://"):
         yield LocalStore.from_url(url, mkdir=True)
@@ -44,7 +45,10 @@ def read_completion(store: ObjectStore, source_id: str) -> dict | None:
         return None
 
 
-def publish(store: ObjectStore, base_url: str, source_id: str, product: Path, ndvi: Path, thumbnail: Path) -> dict:
+# Keep the storage destination, source ID, and three output paths explicit at call sites.
+def publish(  # noqa: PLR0913, PLR0917
+    store: ObjectStore, base_url: str, source_id: str, product: Path, ndvi: Path, thumbnail: Path
+) -> dict:
     """Upload this attempt's files and return the first completed attempt's record."""
     prefix = f"{PIPELINE_VERSION}/{source_id}/attempts/{uuid4()}"
     base_url = base_url.rstrip("/")
@@ -96,5 +100,5 @@ def publish(store: ObjectStore, base_url: str, source_id: str, product: Path, nd
         )
     except AlreadyExistsError:
         # Another attempt won. Register its immutable metadata, not this attempt's URLs.
-        return read_completion(store, source_id)
+        return json.loads(bytes(obs.get(store, completion_key(source_id)).bytes()))
     return record

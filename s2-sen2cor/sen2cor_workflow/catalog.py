@@ -1,6 +1,8 @@
+from uuid import UUID
+
 import numpy as np
 import xarray as xr
-from tilebox.datasets import Client
+from tilebox.datasets import Client, DatasetClient
 from tilebox.datasets.assets import Asset, AssetCollection, AssetLocation
 from tilebox.datasets.data.datasets import DatasetKind
 from tilebox.datasets.schema import Assets, Authentication, Storage
@@ -8,14 +10,15 @@ from tilebox.datasets.schema import Assets, Authentication, Storage
 COLLECTION = "L2A"
 
 
-def create_catalog(code_name: str):
+def create_catalog(code_name: str) -> DatasetClient:
     """Create or update the results schema and ensure the L2A collection exists."""
     dataset = Client().create_or_update_dataset(
         DatasetKind.SPATIOTEMPORAL,
         code_name,
         fields=[
             {"name": "title", "type": str, "roles": ["primary_title"]},
-            *[{"name": name, "type": str, "queryable": True} for name in ("source_datapoint_id", "pipeline_version")],
+            {"name": "source_datapoint_id", "type": str, "queryable": True},
+            {"name": "pipeline_version", "type": str, "queryable": True},
             {"name": "sen2cor_version", "type": str},
             {"name": "assets", "type": Assets},
             {"name": "storage", "type": Storage},
@@ -51,7 +54,7 @@ def metadata_row(source: xr.Dataset, record: dict) -> xr.Dataset:
     return xr.Dataset(fields, coords={"time": [source.time.values]})
 
 
-def register(dataset_slug: str, source: xr.Dataset, record: dict):
+def register(dataset_slug: str, source: xr.Dataset, record: dict) -> list[UUID]:
     """Ingest result metadata, allowing an identical record on retry."""
     # The SDK assigns IDs; retries must reuse the same metadata.
     return (

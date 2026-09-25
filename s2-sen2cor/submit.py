@@ -28,4 +28,4 @@ if __name__ == "__main__":
             cluster=os.environ["TILEBOX_CLUSTER"],
         )
     )
-    print(job)
+    print(job)  # noqa: T201 - CLI output

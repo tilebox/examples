@@ -1,13 +1,18 @@
+from __future__ import annotations
+
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+from typing import Any
 from unittest.mock import MagicMock
 
 import numpy as np
 import obstore as obs
 import pytest
 import xarray as xr
-from obstore.store import AzureStore, LocalStore, MemoryStore
+from obstore.store import AzureStore, LocalStore, MemoryStore, ObjectStore
 from shapely.geometry import box
 from tilebox.datasets.assets import AssetCollection
+from tilebox.datasets.datasets.stac.v1.asset_pb import KnownAssetRole
 
 from sen2cor_workflow import catalog, results, tasks
 from sen2cor_workflow.catalog import metadata_row
@@ -15,7 +20,7 @@ from sen2cor_workflow.results import completion_key, download_asset, open_store,
 from sen2cor_workflow.tasks import ProcessScene
 
 
-def test_catalog_uses_only_two_queryable_strings(monkeypatch):
+def test_catalog_uses_only_two_queryable_strings(monkeypatch: pytest.MonkeyPatch) -> None:
     """Reserve the backend's two string indexes for source and pipeline lookups."""
     client = MagicMock()
     monkeypatch.setattr(catalog, "Client", lambda: client)
@@ -29,7 +34,7 @@ def test_catalog_uses_only_two_queryable_strings(monkeypatch):
 
 
 @pytest.fixture(params=["local", "memory"])
-def storage(request, tmp_path):
+def storage(request: pytest.FixtureRequest, tmp_path: Path) -> tuple[ObjectStore, str]:
     """Provide a local or in-memory object store and its result URL."""
     if request.param == "local":
         root = tmp_path / "results with spaces"
@@ -38,7 +43,7 @@ def storage(request, tmp_path):
 
 
 @pytest.fixture
-def files(tmp_path):
+def files(tmp_path: Path) -> tuple[Path, Path, Path]:
     """Create sample product, NDVI, and thumbnail files for upload tests."""
     product = tmp_path / "output space.SAFE"
     product.mkdir()
@@ -50,32 +55,36 @@ def files(tmp_path):
     return product, ndvi, thumbnail
 
 
-def test_partial_upload_never_publishes_completion(storage, files, monkeypatch):
+def test_partial_upload_never_publishes_completion(
+    storage: tuple[ObjectStore, str], files: tuple[Path, Path, Path], monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Check that an interrupted upload leaves no completion record."""
     store, url = storage
     put = obs.put
 
-    def interrupted(store, key, content, **kwargs):
+    def interrupted(store: ObjectStore, key: str, content: Path | bytes, **kwargs: Any) -> obs.PutResult:
         """Fail the thumbnail upload while allowing earlier writes."""
         if key.endswith("thumbnail.png"):
             raise OSError("interrupted upload")
         return put(store, key, content, **kwargs)
 
     monkeypatch.setattr(obs, "put", interrupted)
-    with pytest.raises(OSError):
+    with pytest.raises(OSError, match="interrupted upload"):
         publish(store, url, "source", *files)
     assert read_completion(store, "source") is None
 
 
 @pytest.mark.parametrize("version", ["v1", "v2"])
-def test_old_completion_is_not_reused(storage, version):
+def test_old_completion_is_not_reused(storage: tuple[ObjectStore, str], version: str) -> None:
     """Ignore completion records from older processing and metadata schemas."""
     store, _ = storage
     obs.put(store, f"sen2cor-02.12.04-ndvi-{version}/source/complete.json", b'{"sen2cor_version":"02.12.04"}')
     assert read_completion(store, "source") is None
 
 
-def test_concurrent_publication_registers_winner_without_overwriting(storage, files):
+def test_concurrent_publication_registers_winner_without_overwriting(
+    storage: tuple[ObjectStore, str], files: tuple[Path, Path, Path]
+) -> None:
     """Check that concurrent attempts and later retries return the same completed result."""
     store, url = storage
     with ThreadPoolExecutor(max_workers=2) as executor:
@@ -87,7 +96,9 @@ def test_concurrent_publication_registers_winner_without_overwriting(storage, fi
     assert bytes(obs.get(store, completion_key("source")).bytes()) == original
 
 
-def test_metadata_preserves_acquisition_geometry_and_assets(storage, files):
+def test_metadata_preserves_acquisition_geometry_and_assets(
+    storage: tuple[ObjectStore, str], files: tuple[Path, Path, Path]
+) -> None:
     """Check that repeatable metadata retains the source time, footprint, and output assets."""
     store, url = storage
     record = publish(store, url, "source", *files)
@@ -100,15 +111,17 @@ def test_metadata_preserves_acquisition_geometry_and_assets(storage, files):
     assert row.geometry.item().equals(source.geometry.item())
     assets = AssetCollection.from_datapoint(row.isel(time=0))
     assert set(assets) == {"product", "ndvi", "metadata", "rgb"}
-    assert not any(name.endswith("_url") for name in row.data_vars)
+    assert not any(str(name).endswith("_url") for name in row.data_vars)
     for key, asset in assets.items():
         assert asset.primary.href == record["assets"][key]["href"]
-        assert "THUMBNAIL" not in {role.name for role in asset.roles}
+        assert KnownAssetRole.THUMBNAIL not in asset.roles
     assert assets["product"].primary.href.endswith("output%20space.SAFE/")
     xr.testing.assert_identical(row, metadata_row(source, record))
 
 
-def test_local_publication_and_notebook_reads_need_no_azure(files, tmp_path, monkeypatch):
+def test_local_publication_and_notebook_reads_need_no_azure(
+    files: tuple[Path, Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Check local writes and asset reads without constructing Azure credentials."""
     credential = MagicMock(side_effect=AssertionError("Local storage must not authenticate to Azure"))
     monkeypatch.setattr(results, "DefaultAzureCredential", credential)
@@ -124,7 +137,7 @@ def test_local_publication_and_notebook_reads_need_no_azure(files, tmp_path, mon
     credential.assert_not_called()
 
 
-def test_azure_factory_uses_identity_and_preserves_container_prefix(monkeypatch):
+def test_azure_factory_uses_identity_and_preserves_container_prefix(monkeypatch: pytest.MonkeyPatch) -> None:
     """Check Azure store configuration and credential cleanup without network calls."""
     credential = MagicMock()
     factory = MagicMock(return_value=credential)
@@ -139,7 +152,9 @@ def test_azure_factory_uses_identity_and_preserves_container_prefix(monkeypatch)
     credential.__exit__.assert_called_once()
 
 
-def test_laptop_task_publishes_then_retries_catalog_without_reprocessing(files, tmp_path, monkeypatch):
+def test_laptop_task_publishes_then_retries_catalog_without_reprocessing(
+    files: tuple[Path, Path, Path], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     """Check that a catalog retry reuses local outputs without rerunning correction."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.delenv("RESULTS_STORAGE_URL", raising=False)
@@ -154,7 +169,7 @@ def test_laptop_task_publishes_then_retries_catalog_without_reprocessing(files, 
     monkeypatch.setattr(tasks, "CopernicusStorageClient", cdse)
     correction = MagicMock(return_value=files[0])
     monkeypatch.setattr(tasks, "correct", correction)
-    monkeypatch.setattr(tasks, "derive", lambda *args: files[1:])
+    monkeypatch.setattr(tasks, "derive", lambda *_args: files[1:])
     register = MagicMock(side_effect=[RuntimeError("catalog unavailable"), None])
     monkeypatch.setattr(tasks, "register", register)
     task = ProcessScene(source_id="source", source_collection="S2A_S2MSI1C")
@@ -169,7 +184,9 @@ def test_laptop_task_publishes_then_retries_catalog_without_reprocessing(files, 
     ndvi_href = register.call_args.args[2]["assets"]["ndvi"]["href"]
     assert messages.count(f"L2A result registered; NDVI: {ndvi_href}") == 1
     cdse.assert_called_once_with(
-        access_key="test-cdse-access", secret_access_key="test-cdse-secret", cache_directory=None
+        access_key="test-cdse-access",
+        secret_access_key="test-cdse-secret",  # noqa: S106 - dummy credential for the mocked client
+        cache_directory=None,
     )
     correction.assert_called_once()
     assert register.call_count == 2

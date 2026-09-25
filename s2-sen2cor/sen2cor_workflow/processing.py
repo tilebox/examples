@@ -5,9 +5,10 @@ from pathlib import Path
 import numpy as np
 import rasterio
 from defusedxml import ElementTree
+from numpy.typing import NDArray
 from PIL import Image
 from rasterio.enums import Resampling
-from rasterio.shutil import copy as copy_raster
+from rasterio.shutil import copy as copy_raster  # ty: ignore[unresolved-import] - compiled Rasterio module
 from rasterio.vrt import WarpedVRT
 
 SEN2COR_VERSION = "02.12.04"
@@ -19,7 +20,13 @@ VALID_SCL = (4, 5, 6)  # vegetation, bare soil, water; exclude clouds, shadows, 
 
 def check_sen2cor_version() -> None:
     """Reject a processor whose reported version differs from the cataloged version."""
-    result = subprocess.run(["L2A_Process", "--help"], check=True, capture_output=True, text=True, timeout=60)
+    result = subprocess.run(
+        ["L2A_Process", "--help"],  # noqa: S607 - Sen2Cor is installed on the runner's PATH
+        check=True,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
     match = re.search(r"Sen2Cor\. Version:\s*(\d+\.\d+\.\d+),", result.stdout)
     version = match.group(1) if match else "unknown"
     if version != SEN2COR_VERSION:
@@ -32,8 +39,8 @@ def correct(input_safe: Path, output_dir: Path) -> Path:
         raise ValueError("Sen2Cor requires a complete L1C SAFE product")
     check_sen2cor_version()
     output_dir.mkdir(parents=True, exist_ok=True)
-    subprocess.run(
-        ["L2A_Process", str(input_safe), "--output_dir", str(output_dir), "--resolution", "10"],
+    subprocess.run(  # noqa: S603 - fixed executable and local paths, without a shell
+        ["L2A_Process", str(input_safe), "--output_dir", str(output_dir), "--resolution", "10"],  # noqa: S607
         check=True,
         timeout=4 * 60 * 60,
     )
@@ -62,7 +69,15 @@ def reflectance_parameters(metadata: Path) -> tuple[float, float, float]:
     return scale, offsets.get("3", 0.0), offsets.get("7", 0.0)
 
 
-def ndvi(red_dn, nir_dn, scl, scale, red_offset, nir_offset):
+# The three input bands and their calibration parameters are independent inputs.
+def ndvi(  # noqa: PLR0913, PLR0917
+    red_dn: NDArray[np.uint16],
+    nir_dn: NDArray[np.uint16],
+    scl: NDArray[np.uint8],
+    scale: float,
+    red_offset: float,
+    nir_offset: float,
+) -> NDArray[np.float32]:
     """Compute NDVI from corrected reflectance, masking invalid pixels and excluded SCL classes."""
     red = (red_dn.astype(np.float32) + red_offset) / scale
     nir = (nir_dn.astype(np.float32) + nir_offset) / scale
@@ -94,20 +109,20 @@ def derive(product: Path, destination: Path) -> tuple[Path, Path]:
     with rasterio.open(red_path) as red, rasterio.open(nir_path) as nir, rasterio.open(scl_path) as scl:
         if (red.shape, red.transform, red.crs) != (nir.shape, nir.transform, nir.crs):
             raise ValueError("B04 and B08 grids differ")
-        profile = dict(
-            driver="GTiff",
-            width=red.width,
-            height=red.height,
-            count=1,
-            dtype="float32",
-            crs=red.crs,
-            transform=red.transform,
-            nodata=NODATA,
-            tiled=True,
-            blockxsize=512,
-            blockysize=512,
-            compress="deflate",
-        )
+        profile = {
+            "driver": "GTiff",
+            "width": red.width,
+            "height": red.height,
+            "count": 1,
+            "dtype": "float32",
+            "crs": red.crs,
+            "transform": red.transform,
+            "nodata": NODATA,
+            "tiled": True,
+            "blockxsize": 512,
+            "blockysize": 512,
+            "compress": "deflate",
+        }
         with (
             WarpedVRT(
                 scl,
