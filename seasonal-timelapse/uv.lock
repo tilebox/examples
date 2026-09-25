@@ -2042,6 +2042,7 @@ dependencies = [
     { name = "shapely" },
     { name = "tilebox" },
     { name = "tilebox-datasets" },
+    { name = "tilebox-workflows" },
     { name = "xarray" },
 ]
 
@@ -2059,6 +2060,7 @@ requires-dist = [
     { name = "shapely", specifier = ">=2.1.2" },
     { name = "tilebox" },
     { name = "tilebox-datasets", specifier = ">=0.61.0" },
+    { name = "tilebox-workflows", specifier = ">=0.62.0" },
     { name = "xarray", specifier = ">=2025.9.0" },
 ]
 
@@ -2225,7 +2227,7 @@ wheels = [
 
 [[package]]
 name = "tilebox-workflows"
-version = "0.61.0"
+version = "0.62.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "boto3" },
@@ -2245,9 +2247,9 @@ dependencies = [
     { name = "tilebox-datasets" },
     { name = "tilebox-grpc" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ed/fb/a5cbc681d63fe666a1c2fe52d2546832cfac5b27d3044a46518c90db9335/tilebox_workflows-0.61.0.tar.gz", hash = "sha256:3ee54a3dd894e60d85c4faba3144788f362a4226c7c9f413705927a2c8a67414", size = 106652, upload-time = "2026-09-04T10:02:28.974Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/1f/e5/b08ffa58b79915f9e9cf556a3f22562f16a7182e7120a8f8d9f8814ee2e7/tilebox_workflows-0.62.0.tar.gz", hash = "sha256:a5944167504563af2aabb3709878c216e73e5e5dc1d73efc4e50ccfbf3a0da58", size = 109668, upload-time = "2026-09-17T08:08:09.29Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/fc/ee/5182649fffbc3864ab4a30e80da20b1bd119419df615eb8aa5b5beab26fa/tilebox_workflows-0.61.0-py3-none-any.whl", hash = "sha256:83611354436a324350aec9680aefd6d22857c06ced7289d3502b63ae01fe2493", size = 142286, upload-time = "2026-09-04T10:02:27.516Z" },
+    { url = "https://files.pythonhosted.org/packages/87/3a/12d1cb36eccae81787199acc25a2fa4e11a3f16bb0e0847b7ba5ec898a08/tilebox_workflows-0.62.0-py3-none-any.whl", hash = "sha256:1f29fb1a168194f3a4cd18e05b50a0f2ae4abcadb24a426671597dcbcb86a398", size = 146358, upload-time = "2026-09-17T08:08:07.837Z" },
 ]
 
 [[package]]

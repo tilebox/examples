@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import os
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
@@ -61,7 +62,7 @@ class BuildSeasonalTimelapse(Task):
         # Query the Sentinel-2 dataset for low-cloud scenes covering the AOI in the time range
         with context.tracer.span("query"):
             context.logger.info("Searching for low-cloud scenes", start=start.isoformat(), end=end.isoformat())
-            collection = _dataset_client(context).dataset(DATASET).collection(COLLECTION)
+            collection = Client().dataset(DATASET).collection(COLLECTION)
             scenes = collection.query(
                 temporal_extent=TimeInterval(start=start, end=end),
                 spatial_extent={"geometry": aoi, "mode": "geometry_contains_filter"},
@@ -113,7 +114,7 @@ class RenderSeasonalFrame(Task):
     async def execute(self, context: ExecutionContext) -> None:
         """Read and render one branded seasonal RGB frame."""
         context.current_task.display = f"Render {self.season}"
-        datapoint = _dataset_client(context).dataset(DATASET).collection(COLLECTION).find(self.datapoint_id)
+        datapoint = Client().dataset(DATASET).collection(COLLECTION).find(self.datapoint_id)
         stac_id = str(datapoint.stac_id.item())
 
         with context.tracer.span("read-sentinel-2-window"):
@@ -163,29 +164,20 @@ class AssembleTimelapse(Task):
             size_bytes=destination.stat().st_size,
         )
         with context.tracer.span("upload-webp"):
-            storage_path = _upload_to_workflow_storage(destination, relative_destination.as_posix(), context)
+            storage_path = _upload_to_workflow_storage(destination, relative_destination.as_posix())
         context.logger.info(
             "Timelapse uploaded to workflow storage",
             storage_path=storage_path,
         )
 
 
-def _dataset_client(context: ExecutionContext) -> Client:
-    """Create a dataset client using the API connection inherited by the runner."""
-    workflow_client = context.runner_context.storage_locations._client  # noqa: SLF001
-    return Client(**workflow_client._auth)  # noqa: SLF001
-
-
-def _upload_to_workflow_storage(source: Path, object_path: str, context: ExecutionContext) -> str:
+def _upload_to_workflow_storage(source: Path, object_path: str) -> str:
     """Upload a file through the workflow storage HTTP endpoint."""
     content = source.read_bytes()
     digest = hashlib.sha256(content).hexdigest()
 
-    # Workflow storage is an upcoming API. Until the high-level client lands, reuse the low-level client connection
-    # inherited by both direct runners and release workers.
-    client = context.runner_context.storage_locations._client  # noqa: SLF001
-    api_url = client._auth["url"].removesuffix("/")  # noqa: SLF001
-    token = client._auth["token"]  # noqa: SLF001
+    api_url = (os.environ.get("TILEBOX_API_URL") or "https://api.tilebox.com").removesuffix("/")
+    token = os.environ.get("TILEBOX_API_KEY")
     if not token:
         raise RuntimeError("workflow storage upload requires an authenticated Tilebox client")
 

@@ -1,6 +1,5 @@
 from datetime import datetime, timezone
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import Mock
 from uuid import UUID
 
@@ -12,7 +11,6 @@ from shapely import transform
 from seasonal_rgb_timelapse.tasks import (
     BuildSeasonalTimelapse,
     RenderSeasonalFrame,
-    _dataset_client,
     _season_name,
     _square_aoi,
     _upload_to_workflow_storage,
@@ -61,25 +59,9 @@ def test_root_task_defaults_to_an_optional_time_range() -> None:
     assert task.max_cloud_percent == 20.0
 
 
-def test_dataset_client_uses_runner_api_connection(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Dataset access reuses the API connection inherited by the runner."""
-    dataset_client = Mock()
-    client_type = Mock(return_value=dataset_client)
-    monkeypatch.setattr("seasonal_rgb_timelapse.tasks.Client", client_type)
-    auth = {"url": "https://api.tilebox.com", "token": "secret"}
-    workflow_client = SimpleNamespace(_auth=auth)
-    context = SimpleNamespace(
-        runner_context=SimpleNamespace(storage_locations=SimpleNamespace(_client=workflow_client)),
-    )
-
-    result = _dataset_client(context)
-
-    client_type.assert_called_once_with(url="https://api.tilebox.com", token=auth["token"])
-    assert result is dataset_client
-
-
-def test_upload_uses_runner_api_connection(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    """Workflow storage reuses the API connection inherited by the runner."""
+@pytest.mark.parametrize("api_url", [None, "https://api.tilebox.dev/"])
+def test_upload_uses_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, api_url: str | None) -> None:
+    """Workflow storage uses environment credentials and an optional API URL."""
     source = tmp_path / "timelapse.webp"
     source.write_bytes(b"webp")
     response = Mock()
@@ -88,21 +70,36 @@ def test_upload_uses_runner_api_connection(monkeypatch: pytest.MonkeyPatch, tmp_
     }
     put = Mock(return_value=response)
     monkeypatch.setattr("seasonal_rgb_timelapse.tasks.niquests.put", put)
-    client = SimpleNamespace(_auth={"url": "https://api.tilebox.com/", "token": "secret"})
-    context = SimpleNamespace(
-        runner_context=SimpleNamespace(storage_locations=SimpleNamespace(_client=client)),
-    )
+    monkeypatch.setenv("TILEBOX_API_KEY", "secret")
+    if api_url is None:
+        monkeypatch.delenv("TILEBOX_API_URL", raising=False)
+    else:
+        monkeypatch.setenv("TILEBOX_API_URL", api_url)
 
-    storage_path = _upload_to_workflow_storage(source, "seasonal output/timelapse.webp", context)
+    storage_path = _upload_to_workflow_storage(source, "seasonal output/timelapse.webp")
 
+    expected_host = "https://api.tilebox.com" if api_url is None else "https://api.tilebox.dev"
     put.assert_called_once_with(
-        "https://api.tilebox.com/v1/storage/a57bb082e728a0cdce930ecfcccf4510a3a247be5f322b09b3a971a3f5ed34f8/seasonal%20output/timelapse.webp",
+        f"{expected_host}/v1/storage/a57bb082e728a0cdce930ecfcccf4510a3a247be5f322b09b3a971a3f5ed34f8/seasonal%20output/timelapse.webp",
         data=b"webp",
         headers={"Authorization": "Bearer secret", "Content-Type": "image/webp"},
         timeout=60,
     )
     response.raise_for_status.assert_called_once_with()
     assert storage_path == response.json.return_value["path"]
+
+
+def test_upload_requires_api_key(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    source = tmp_path / "timelapse.webp"
+    source.write_bytes(b"webp")
+    monkeypatch.delenv("TILEBOX_API_KEY", raising=False)
+    put = Mock()
+    monkeypatch.setattr("seasonal_rgb_timelapse.tasks.niquests.put", put)
+
+    with pytest.raises(RuntimeError, match="authenticated Tilebox client"):
+        _upload_to_workflow_storage(source, "timelapse.webp")
+
+    put.assert_not_called()
 
 
 def test_season_name_for_cross_year_season() -> None:

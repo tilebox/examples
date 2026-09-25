@@ -43,8 +43,7 @@ The quickstart provides `center_lat_lon` and sets `square_width_km` to 10. When 
 The root task uses the Tilebox dataset client to find low-cloud Sentinel-2 L2A scenes for the requested area and time range:
 
 ```python
-workflow_client = context.runner_context.storage_locations._client
-collection = Client(**workflow_client._auth).dataset(DATASET).collection(COLLECTION)
+collection = Client().dataset(DATASET).collection(COLLECTION)
 scenes = collection.query(
     temporal_extent=TimeInterval(start=start, end=end),
     spatial_extent={"geometry": aoi, "mode": "geometry_contains_filter"},
@@ -53,8 +52,7 @@ scenes = collection.query(
 ```
 
 The containment mode returns only scenes whose geometry covers the complete square. The task groups the resulting xarray dataset into three-month periods and chooses the lowest-cloud scene from each group.
-Both the initial query and subsequent scene lookups inherit the API URL and credentials from the authenticated workflow
-client, so tasks do not need a separate `TILEBOX_API_KEY` environment variable.
+Both the initial query and subsequent scene lookups use the dataset client's default configuration.
 
 ### Create parallel work
 
@@ -93,6 +91,8 @@ JSON represents tuples as arrays and datetimes as RFC 3339 strings.
 ## Outputs
 
 The workflow writes its result to `~/tilebox_outputs/<job-specific-directory>/timelapse.webp` in the runner user's home directory and uploads it to workflow storage as `<job-specific-directory>/timelapse.webp`. The final structured log messages include the local path in `~/...` form and the uploaded `storage_path`, which the Console quickstart uses to display the animation. Intermediate PNG frames remain under `outputs/<job-specific-directory>/frames/` in the runner's working directory.
+
+Storage uploads use `TILEBOX_API_KEY` for authentication and `TILEBOX_API_URL` for the API endpoint, defaulting to `https://api.tilebox.com`.
 
 Output directories include the dates, coordinates, and square width, so separate runs do not overwrite each other. Intermediate outputs are local to the runners. The frame and assembly tasks therefore need runners that share the same working directory and filesystem.
 
