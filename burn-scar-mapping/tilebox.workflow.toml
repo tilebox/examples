@@ -1,0 +1,13 @@
+[workflow]
+slug = "burn-scar-mapping-EngRbLn7Zb8iSa"
+root = "."
+runner = "runner:runner"
+
+[build]
+include = [
+  "pyproject.toml",
+  "uv.lock",
+  "README.md",
+  "runner.py",
+  "burn_scar_mapping/**/*.py",
+]
