@@ -2,6 +2,7 @@ import asyncio
 from io import BytesIO
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import numpy as np
 import pytest
@@ -12,15 +13,21 @@ from odc.geo.geobox import GeoBox
 from odc.geo.geom import box as geo_box
 from odc.geo.xr import wrap_xr
 from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
+from opentelemetry.sdk.trace import Span, TracerProvider
 from opentelemetry.sdk.trace.export import SimpleSpanProcessor
 from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from PIL import Image
+from rasterio.enums import ColorInterp
 from rasterio.transform import from_origin
+from rasterio.windows import Window
+from tilebox.datasets.assets import Asset, AssetCollection
 from tilebox.datasets.datasets.stac.v1.asset_metadata_pb import RasterProperties
+from tilebox.storage.aio import Client as StorageClient
 from tilebox.workflows.cache import LocalFileSystemCache
 from tilebox.workflows.observability.tracing import NoopWorkflowTracer
+from xarray.ufuncs import isfinite
 
+from burn_scar_mapping import imagery
 from burn_scar_mapping.imagery import (
     burn_overlay,
     calibrated,
@@ -40,23 +47,25 @@ def test_calibration_masks_raw_nodata_before_offset() -> None:
     np.testing.assert_allclose(actual, [[np.nan, 0, 0.15, 0.5]], atol=1e-7)
 
 
-def test_clouds_and_incomplete_pixels_do_not_win_overlaps() -> None:
+@pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf])
+def test_clouds_and_incomplete_pixels_do_not_win_overlaps(invalid: float) -> None:
     scl = xr.DataArray(np.arange(12)[None, :], dims=("y", "x"))
     first = xr.DataArray(np.full((5, 1, 12), 0.2, dtype=np.float32), dims=("band", "y", "x"))
-    first[2, 0, 5] = np.nan
-    mosaic = xr.full_like(first, np.nan)
+    first[2, 0, 5] = invalid
+    mosaic = xr.full_like(first, invalid)
     mosaic = merge_observation(mosaic, first, scl)
-    assert np.isfinite(mosaic).all("band").values.tolist() == [[i == 4 for i in range(12)]]
+    assert isfinite(mosaic).all("band").values.tolist() == [[i == 4 for i in range(12)]]
     second = xr.full_like(first, 0.6)
     mosaic = merge_observation(mosaic, second, xr.full_like(scl, 5))
     np.testing.assert_allclose(mosaic[:, 0, 4], 0.2)
     np.testing.assert_allclose(mosaic[:, 0, 5], 0.6)
-    assert np.isfinite(mosaic).all()
+    assert isfinite(mosaic).all()
 
 
-def test_nbr_and_dnbr_direction_boundary_invalid_and_rgb() -> None:
+@pytest.mark.parametrize("invalid", [np.nan, np.inf, -np.inf])
+def test_nbr_and_dnbr_direction_boundary_invalid_and_rgb(invalid: float) -> None:
     reflectance = np.array(
-        [[[0.1, 0.3, 0.5, 0, -0.1, np.nan]], [[0.3, 0.3, 0.1, 0, 0.3, 0.3]]],
+        [[[0.1, 0.3, 0.5, 0, -0.1, invalid]], [[0.3, 0.3, 0.1, 0, 0.3, 0.3]]],
         dtype=np.float32,
     )
     nbr = normalized_burn_ratio(xr.DataArray(reflectance, dims=("band", "y", "x")))
@@ -65,7 +74,7 @@ def test_nbr_and_dnbr_direction_boundary_invalid_and_rgb() -> None:
     assert valid.all()
     rgba = np.concatenate([rgb, np.full((1, 1, 6), 255, dtype=np.uint8)])
     image = Image.fromarray(np.moveaxis(rgba, 0, -1), "RGBA")
-    dnbr = xr.DataArray([[0.27, 0.26, -0.5, np.nan, np.nan, 0.8]])
+    dnbr = xr.DataArray([[0.27, 0.26, -0.5, invalid, np.nan, 0.8]])
     overlay = np.asarray(burn_overlay(dnbr, image, 0.27))
     np.testing.assert_array_equal(overlay[0, 0], [255, 92, 38, 255])
     np.testing.assert_array_equal(overlay[0, 1:5], np.moveaxis(rgba, 0, -1)[0, 1:5])
@@ -77,8 +86,8 @@ def test_water_invalid_for_rgb_and_nbr() -> None:
     values = xr.DataArray(np.full((3, 1, 6), 0.2), dims=("band", "y", "x"))
     rgb = merge_observation(xr.full_like(values, np.nan), values, scl)
     nbr = merge_observation(xr.full_like(values[:2], np.nan), values[:2], scl)
-    np.testing.assert_array_equal(np.isfinite(rgb[0]), [[True, True, False, False, False, False]])
-    np.testing.assert_array_equal(np.isfinite(nbr[0]), [[True, True, False, False, False, False]])
+    np.testing.assert_array_equal(isfinite(rgb[0]), [[True, True, False, False, False, False]])
+    np.testing.assert_array_equal(isfinite(nbr[0]), [[True, True, False, False, False, False]])
 
 
 def test_reflectance_display_levels_gamma_and_nodata() -> None:
@@ -107,7 +116,7 @@ def test_read_aligns_different_resolution_and_partial_coverage() -> None:
         transform = from_origin(600000, 4400040, 20, 20)
         width = height = 2
 
-        async def read(self, *, window: rasterio.windows.Window) -> SimpleNamespace:
+        async def read(self, *, window: Window) -> SimpleNamespace:
             # The helper clips the larger destination bounds to source pixels.
             assert (window.col_off, window.row_off, window.width, window.height) == (
                 0,
@@ -130,8 +139,8 @@ def test_read_aligns_different_resolution_and_partial_coverage() -> None:
 
     actual = asyncio.run(
         read_band(
-            Storage(),
-            asset,
+            cast(StorageClient, Storage()),
+            cast(Asset, asset),
             GeoBox((4, 6), from_origin(599980, 4400040, 10, 10), "EPSG:32629"),
         )
     )
@@ -151,12 +160,14 @@ def test_read_aligns_different_resolution_and_partial_coverage() -> None:
     )
     # SCL has a spatial resolution but no scale: absent protobuf scale must mean 1, not 0.
     asset.raster = RasterProperties(spatial_resolution=20)
-    scl = asyncio.run(read_band(Storage(), asset, GeoBox((2, 2), Source.transform, Source.crs)))
+    scl = asyncio.run(
+        read_band(cast(StorageClient, Storage()), cast(Asset, asset), GeoBox((2, 2), Source.transform, Source.crs))
+    )
     np.testing.assert_allclose(scl, [[np.nan, 2000], [4000, 6000]])
 
 
 @pytest.mark.parametrize(
-    "bounds,resolution,epsg",
+    ("bounds", "resolution", "epsg"),
     [
         ((-7.82, 40.08, -7.76, 40.14), 20, 32629),
         ((150.1, -34.2, 150.3, -34.0), 30, 32756),
@@ -166,6 +177,7 @@ def test_grid_uses_utm_and_requested_resolution(
     bounds: tuple[float, float, float, float], resolution: float, epsg: int
 ) -> None:
     grid = output_grid(bounds, resolution)
+    assert grid.crs is not None
     assert grid.crs.epsg == epsg
     assert grid.transform.a == resolution
     assert grid.transform.e == -resolution
@@ -175,14 +187,12 @@ def test_grid_uses_utm_and_requested_resolution(
 
 
 @pytest.mark.parametrize(
-    "product,keys",
+    ("product", "keys"),
     [("rgb", ["red", "green", "blue", "scl"]), ("nbr", ["nir", "swir22", "scl"])],
 )
 def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, product: str, keys: list[str]
 ) -> None:
-    from burn_scar_mapping import imagery
-
     bounds = (-7.9, 40.1, -7.7, 40.3)
     grid = output_grid(bounds)
     height, width = grid.shape
@@ -202,10 +212,13 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
             self.asset = asset
             self.height, self.width = height, width
 
-        async def read(self, *, window: rasterio.windows.Window) -> SimpleNamespace:
+        async def read(self, *, window: Window) -> SimpleNamespace:
             calls.append((self.asset.scene, self.asset.key))
-            assert trace.get_current_span().name == f"S2B_T59VME_2026082{self.asset.scene}T235827_L2A"
-            assert window.width == width and window.height == height
+            span = trace.get_current_span()
+            assert isinstance(span, Span)
+            assert span.name == f"S2B_T59VME_2026082{self.asset.scene}T235827_L2A"
+            assert window.width == width
+            assert window.height == height
             key, scene = self.asset.key, self.asset.scene
             value = {
                 "red": 1750 if scene == 0 else 1000,
@@ -241,7 +254,7 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
         } | {"scl": SimpleNamespace(key="scl", scene=scene, nodata=0, raster=RasterProperties())}
 
     monkeypatch.setattr(imagery, "StorageClient", Storage)
-    scenes = [assets(i) for i in range(2)]
+    scenes = [cast(AssetCollection, assets(i)) for i in range(2)]
     with tracer.span("mosaic task", attributes={"task_id": "test-task"}) as parent:
         mosaic = asyncio.run(read_mosaic(scenes, grid, keys[:-1], tracer=tracer))
     if product == "rgb":
@@ -254,8 +267,11 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
     assert calls == [(i, key) for i in range(2) for key in keys]
     spans = exporter.get_finished_spans()[:-1]
     assert [span.name for span in spans] == [f"S2B_T59VME_2026082{i}T235827_L2A" for i in range(2)]
-    assert all(span.parent.span_id == parent.get_span_context().span_id for span in spans)
-    assert all(span.attributes["task_id"] == "test-task" for span in spans)
+    for span in spans:
+        assert span.parent is not None
+        assert span.parent.span_id == parent.get_span_context().span_id
+        assert span.attributes is not None
+        assert span.attributes["task_id"] == "test-task"
     provider.shutdown()
     with rasterio.open(path) as ds:
         assert ds.dataset_mask()[height * 3 // 4, width // 8] == 0  # Water.
@@ -265,7 +281,7 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
         assert ds.tags(ns="IMAGE_STRUCTURE")["LAYOUT"] == "COG"
         assert ds.shape == grid.shape.yx
         if product == "rgb":
-            assert ds.colorinterp[-1] == rasterio.enums.ColorInterp.alpha
+            assert ds.colorinterp[-1] == ColorInterp.alpha
             np.testing.assert_array_equal(left, [136, 186, 255])
             # There is no AOI polygon mask: clear corners of the grid remain valid.
             assert ds.dataset_mask()[0, 0] == 255
@@ -303,31 +319,40 @@ def test_empty_mosaics_preserve_georeferencing_and_nodata(tmp_path: Path) -> Non
 def test_delta_and_png_keep_transparency_and_unknown_change(tmp_path: Path) -> None:
     cache = LocalFileSystemCache(tmp_path).group("job")
     grid = GeoBox((1, 6), from_origin(500000, 4000000, 20, 20), "EPSG:32635")
-    cache["before/nbr.tif"] = write_cog(
-        wrap_xr(np.array([[0.6, 0.3, np.nan, 0.7, 0.8, 0.1]], dtype=np.float32), grid),
-        ":mem:",
-        nodata=np.nan,
+    cache["before/nbr.tif"] = cast(
+        bytes,
+        write_cog(
+            wrap_xr(np.array([[0.6, 0.3, np.nan, 0.7, 0.8, 0.1]], dtype=np.float32), grid),
+            ":mem:",
+            nodata=np.nan,
+        ),
     )
-    cache["after/nbr.tif"] = write_cog(
-        wrap_xr(np.array([[0.1, 0.4, 0.2, np.nan, 0.2, 0.2]], dtype=np.float32), grid),
-        ":mem:",
-        nodata=np.nan,
+    cache["after/nbr.tif"] = cast(
+        bytes,
+        write_cog(
+            wrap_xr(np.array([[0.1, 0.4, 0.2, np.nan, 0.2, 0.2]], dtype=np.float32), grid),
+            ":mem:",
+            nodata=np.nan,
+        ),
     )
     rgb = np.full((3, 1, 6), 120, dtype=np.uint8)
     rgb[:, :, 5] = 0  # Valid black must remain opaque.
     alpha = np.array([[[255, 255, 255, 255, 0, 255]]], dtype=np.uint8)
-    cache["after/rgb.tif"] = write_cog(
-        wrap_xr(np.concatenate([rgb, alpha]), grid, axis=1, dims=("band", "y", "x")),
-        ":mem:",
-        nodata=None,
-        photometric="RGB",
-        alpha="YES",
+    cache["after/rgb.tif"] = cast(
+        bytes,
+        write_cog(
+            wrap_xr(np.concatenate([rgb, alpha]), grid, axis=1, dims=("band", "y", "x")),
+            ":mem:",
+            nodata=None,
+            photometric="RGB",
+            alpha="YES",
+        ),
     )
     before = read_raster(cache["before/nbr.tif"])
     after = read_raster(cache["after/nbr.tif"])
     assert np.isnan(before.odc.nodata)
     dnbr = before - after
-    cache["dnbr.tif"] = write_cog(dnbr, ":mem:", nodata=np.nan)
+    cache["dnbr.tif"] = cast(bytes, write_cog(dnbr, ":mem:", nodata=np.nan))
     with Image.open(BytesIO(cache["after/rgb.tif"])) as image:
         overlay = burn_overlay(dnbr, image.convert("RGBA"), 0.27)
     with BytesIO() as buffer:

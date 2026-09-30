@@ -22,6 +22,13 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
     "ruff>=0.16.6",
+    "ty>=0.0.84",
+]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    # Remove once Rasterio and ODC migrate affine transform composition from * to @.
+    'ignore:Use `@` matmul instead of `\*` mul operator for matrix multiplication$:PendingDeprecationWarning:^(rasterio\.transform|odc\.geo\.(math|geobox))$',
 ]
 
 [tool.ruff]
@@ -42,7 +49,7 @@ ignore = [
     "DTZ", # flake8-datetimez: utc datetimes are useful
     "DJ",  # flake8-django: not needed
     "EM",  # flake8-errmsg: str directly in Exception constructor is accetable
-    "TCH", # flake8-type-checking: type checking blocks are weird
+    "TC",  # flake8-type-checking: type checking blocks are weird
     # specific rules
     "ANN401",  # any-type: allow Any in *args and **kwargs
     "S101",    # assert: allow usage of assert
@@ -50,7 +57,8 @@ ignore = [
     "G004",    # logging-f-string: allow usage of f-strings in logging calls
     "PLR2004", # magic-value-comparison: sometimes comparison with constants (e.g. 0) makes sense
     "TRY003",  # raise-vanilla-args: exceptions like this make sense in python
-    "TRY400",  # error-instead-of-exception: logger.error is ok with loguru
+    "TRY400",  # error-instead-of-exception: allow errors without a traceback
+    "CPY001",  # missing-copyright-notice: we don't add copyright notices to our source files
     # disabled because of formatter
     "E501",   # line-too-long -> formatter takes care of this
     "ISC001", # single-line-implicit-str-concatenation -> formatter takes care of this

@@ -1,5 +1,3 @@
-"""Sentinel-2 daily mosaics, local GeoTIFFs, and a PNG burn overlay."""
-
 from pathlib import PurePosixPath
 from urllib.parse import urlsplit
 
@@ -15,6 +13,7 @@ from tilebox.datasets.assets import Asset, AssetCollection
 from tilebox.storage.aio import Client as StorageClient
 from tilebox.storage.geotiff import window_from_bounds
 from tilebox.workflows.observability.tracing import WorkflowTracer
+from xarray.ufuncs import isfinite
 
 Bounds = tuple[float, float, float, float]
 
@@ -54,8 +53,8 @@ def merge_observation(mosaic: xr.DataArray, values: xr.DataArray, scl: xr.DataAr
         values: Aligned bands from one scene, in the mosaic's band order.
         scl: Aligned scene classifications; retain vegetation (4) and land (5).
     """
-    valid = scl.isin([4, 5]) & np.isfinite(values).all("band")
-    take = valid & ~np.isfinite(mosaic).all("band")
+    valid = scl.isin([4, 5]) & isfinite(values).all("band")
+    take = valid & ~isfinite(mosaic).all("band")
     return mosaic.where(~take, values)
 
 
@@ -67,7 +66,7 @@ def normalized_burn_ratio(reflectance: xr.DataArray) -> xr.DataArray:
     """
     nir = reflectance.isel(band=0, drop=True)
     swir = reflectance.isel(band=1, drop=True)
-    valid = np.isfinite(reflectance).all("band") & (nir >= 0) & (swir >= 0) & ((nir + swir) > 0)
+    valid = isfinite(reflectance).all("band") & (nir >= 0) & (swir >= 0) & ((nir + swir) > 0)
     return (nir - swir) / (nir + swir).where(valid)
 
 
@@ -79,7 +78,7 @@ def burn_overlay(dnbr: xr.DataArray, rgb: Image.Image, threshold: float) -> Imag
         rgb: After-day RGBA image.
         threshold: Minimum dNBR to highlight as a possible burn scar.
     """
-    mask = Image.fromarray((np.isfinite(dnbr) & (dnbr >= threshold)).values)
+    mask = Image.fromarray((isfinite(dnbr) & (dnbr >= threshold)).values)
     orange = Image.new("RGB", rgb.size, (255, 64, 0))
     tinted = Image.blend(rgb.convert("RGB"), orange, 0.85)
     overlay = Image.composite(tinted, rgb.convert("RGB"), mask)
@@ -91,7 +90,7 @@ def render_rgb(
     reflectance: NDArray[np.float32],
     gamma: float = 2.2,
 ) -> tuple[NDArray[np.uint8], NDArray[np.bool_]]:
-    """Map reflectance 0–0.3 to display RGB with gamma 2.2; return RGB and validity.
+    """Map reflectance 0-0.3 to display RGB with gamma 2.2; return RGB and validity.
 
     Args:
         reflectance: Band-first red, green, blue reflectance with NaN nodata.

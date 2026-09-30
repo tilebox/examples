@@ -1,10 +1,9 @@
-"""Select two daily mosaics, compute dNBR, and render a burn-scar overlay."""
-
 from collections import defaultdict
 from collections.abc import Iterable
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from typing import cast
 from uuid import uuid4
 
 import cloudpickle
@@ -147,12 +146,15 @@ class MosaicRGB(Task):
         logger.info("Reading RGB bands into mosaic", width=self.grid.width, height=self.grid.height)
         rgb = await read_mosaic(assets, self.grid, ["red", "green", "blue"], tracer=context.tracer, mask="scl")
         rgba = render_rgba(rgb)
-        context.job_cache[f"{self.day}/rgb.tif"] = write_cog(
-            rgba,
-            ":mem:",
-            nodata=None,
-            photometric="RGB",
-            alpha="YES",
+        context.job_cache[f"{self.day}/rgb.tif"] = cast(
+            bytes,
+            write_cog(
+                rgba,
+                ":mem:",
+                nodata=None,
+                photometric="RGB",
+                alpha="YES",
+            ),
         )
         logger.info("Wrote RGB mosaic", key=f"{self.day}/rgb.tif")
         context.progress("RGB mosaics").done(1)
@@ -186,7 +188,7 @@ class ComputeNBR(Task):
         logger.info("Reading NIR/SWIR bands into mosaic")
         reflectance = await read_mosaic(assets, self.grid, ["nir", "swir22"], tracer=context.tracer, mask="scl")
         nbr = normalized_burn_ratio(reflectance)
-        context.job_cache[f"{self.day}/nbr.tif"] = write_cog(nbr, ":mem:", nodata=np.nan)
+        context.job_cache[f"{self.day}/nbr.tif"] = cast(bytes, write_cog(nbr, ":mem:", nodata=np.nan))
         logger.info("Wrote NBR mosaic", key=f"{self.day}/nbr.tif", valid_fraction=float(np.isfinite(nbr).mean()))
         context.progress("NBR mosaics").done(1)
 
@@ -225,7 +227,7 @@ class ComputeDelta(Task):
             quantile95=float(np.quantile(valid, 0.95)) if valid.size else None,
             max_value=float(valid.max()) if valid.size else None,
         )
-        context.job_cache["dnbr.tif"] = write_cog(dnbr, ":mem:", nodata=np.nan)
+        context.job_cache["dnbr.tif"] = cast(bytes, write_cog(dnbr, ":mem:", nodata=np.nan))
         context.logger.info("Wrote delta NBR", key="dnbr.tif")
 
 

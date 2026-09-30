@@ -44,7 +44,7 @@ def test_selector_uses_clipped_union_not_envelope_or_sum() -> None:
 
 
 @pytest.mark.parametrize(
-    "widths,reverse,expected",
+    ("widths", "reverse", "expected"),
     [
         ([4, 4, 4], False, 1),
         ([4, 4, 4], True, 3),
