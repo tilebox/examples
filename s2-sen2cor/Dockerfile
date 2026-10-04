@@ -1,9 +1,9 @@
-FROM python:3.12-slim-bookworm
+FROM ghcr.io/tilebox/runner:0.5.0
 
 # ESA supplies the standalone processor for Linux x86_64 only.
 RUN test "$(uname -m)" = x86_64 \
     && apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates curl file libexpat1 \
+    && apt-get install -y --no-install-recommends ca-certificates curl file git libexpat1 \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 10001 worker
 ENV HOME=/home/worker
@@ -15,16 +15,12 @@ RUN curl --fail --location --retry 3 \
     && rm /tmp/sen2cor.run \
     && chmod -R a+rX /opt/sen2cor \
     && chown -R worker:worker /home/worker
-COPY --from=ghcr.io/astral-sh/uv:0.11.6 /uv /usr/local/bin/uv
 WORKDIR /app
-COPY pyproject.toml uv.lock ./
-RUN uv sync --frozen --no-dev --no-install-project
-COPY atmospheric_correction/ ./atmospheric_correction/
-COPY runner.py ./
 RUN mkdir /app/outputs && chown worker:worker /app/outputs
-ENV PATH="/app/.venv/bin:/opt/sen2cor/bin:$PATH" \
+ENV PATH="/opt/sen2cor/bin:$PATH" \
+    S2_OUTPUT_DIRECTORY=/app/outputs \
     PYTHONUNBUFFERED=1
 USER worker
 RUN L2A_Process --help >/dev/null \
-    && python -c 'import runner; import rasterio; from pathlib import Path; assert (Path.home() / "sen2cor/2.12/cfg/L2A_GIPP.xml").is_file()'
-CMD ["python", "runner.py"]
+    && test -f "$HOME/sen2cor/2.12/cfg/L2A_GIPP.xml"
+# The inherited command starts a release runner; workflow code is deployed separately.

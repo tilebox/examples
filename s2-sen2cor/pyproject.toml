@@ -5,8 +5,12 @@ description = "Scene-parallel Sen2Cor atmospheric correction with Tilebox"
 requires-python = ">=3.12"
 dependencies = [
   "tilebox>=0.1.0",
-  "tilebox-datasets>=0.61.0",
-  "tilebox-storage",
+  "tilebox-datasets==0.63.2",
+  "tilebox-storage==0.63.2",
+  "tilebox-workflows==0.63.2",
+  "tilebox-grpc==0.63.2",
+  "azure-storage-blob>=12.25",
+  "azure-identity>=1.23",
   "cyclopts>=4.0",
   "python-dotenv>=1.0",
   "tqdm>=4.0",
@@ -87,3 +91,9 @@ unfixable = [
   "F841", # unused-variable -> don't remove them automatically
   "ERA",  # eradicate -> (commented out code), don't remove it automatically
 ]
+
+[tool.ruff.lint.per-file-ignores]
+"infrastructure/*.py" = ["INP001"]
+
+[tool.ty.src]
+exclude = ["infrastructure"]

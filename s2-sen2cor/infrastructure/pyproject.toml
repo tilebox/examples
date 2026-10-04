@@ -1,0 +1,8 @@
+[project]
+name = "s2-sen2cor-events-infrastructure"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+  "tilebox-iac @ git+https://github.com/tilebox/tilebox-iac.git@948d7a526d70b0d769a76a41d7569d885b8c447f",
+  "pulumi-azuread>=6.10.1,<7",
+]

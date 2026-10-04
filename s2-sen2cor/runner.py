@@ -1,24 +1,8 @@
-"""Run a scene worker: uv run runner.py."""
+"""Expose the scene and storage-event tasks to the workflow release runner."""
 
-import os
+from tilebox.workflows import Runner
 
-from cyclopts import run
-from dotenv import load_dotenv
-from tilebox.workflows import Client, Runner
-
+from atmospheric_correction.automations import CalculateNDVI, CorrectAndUpload
 from atmospheric_correction.tasks import ProcessArea, ProcessScene
 
-runner = Runner(tasks=[ProcessArea, ProcessScene])
-
-
-def main() -> None:
-    """Listen for scene tasks on TILEBOX_CLUSTER; start more workers for concurrency.
-
-    Example: uv run runner.py
-    """
-    runner.connect_to(Client(), cluster=os.environ.get("TILEBOX_CLUSTER")).run_forever()
-
-
-if __name__ == "__main__":
-    load_dotenv()
-    run(main)
+runner = Runner(tasks=[ProcessArea, ProcessScene, CorrectAndUpload, CalculateNDVI])

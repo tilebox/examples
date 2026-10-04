@@ -14,7 +14,7 @@ def main(  # noqa: PLR0913 - mirrors the root task's scene-selection inputs
     *,
     start: str = "2025-08-01",
     end: str = "2025-09-01",
-    bounds: tuple[float, float, float, float] = (54.2, 24.2, 54.6, 24.6),
+    bounds: tuple[float, float, float, float] = (1.1, 47.2, 1.3, 47.4),
     dataset: str = "open_data.copernicus.sentinel2_msi",
     collection: str = "S2A_S2MSI1C",
     max_scenes: int = 3,

@@ -1,0 +1,6 @@
+name: s2-sen2cor-events
+runtime:
+  name: python
+  options:
+    toolchain: uv
+description: Azure Blob Storage and Event Grid for local or on-prem Sen2Cor workers

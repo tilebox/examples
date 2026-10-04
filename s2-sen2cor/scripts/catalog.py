@@ -11,12 +11,14 @@ app = App()
 
 
 @app.command
-def create(*, name: str = "sentinel2_l2a", collection: str = "S2A_L2A") -> None:
-    """Create or update the results dataset and collection.
+def create(*, name: str = "sentinel2_l2a", collection: str = "S2A_L2A", ndvi_collection: str = "S2A_NDVI") -> None:
+    """Create or update the results dataset and separate L2A and NDVI collections.
 
     Example: uv run scripts/catalog.py create --name "sentinel2_l2a"
     """
-    print(create_dataset(name, collection))  # noqa: T201
+    dataset = create_dataset(name, collection)
+    dataset.get_or_create_collection(ndvi_collection)
+    print(dataset)  # noqa: T201
 
 
 @app.command

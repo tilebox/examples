@@ -1,0 +1,15 @@
+[workflow]
+slug = "sentinel-2-atmospheric-correction"
+root = "."
+runner = "runner:runner"
+
+[build]
+include = [
+    "tilebox.workflow.toml",
+    "pyproject.toml",
+    "uv.lock",
+    "runner.py",
+    "atmospheric_correction/**",
+]
+exclude = ["**/__pycache__/**", "**/*.pyc"]
+use_gitignore = true

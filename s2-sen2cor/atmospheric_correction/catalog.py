@@ -89,9 +89,67 @@ def metadata_row(source: xr.Dataset, product: Path, rgb_url: str) -> xr.Dataset:
                 roles=frozenset({"metadata" if path.suffix == ".xml" else "data"}),
             )
         )
+    return asset_row(source, product.name, assets)
+
+
+def l2a_metadata_row(source: xr.Dataset, base_url: str, rgb_url: str | None = None) -> xr.Dataset:
+    """Describe uploaded L2A bands, metadata, and an optional public RGB preview."""
+    assets = [
+        Asset(
+            key=band,
+            primary=AssetLocation(href=f"{base_url}/{band}.tif"),
+            media_type="image/tiff; application=geotiff; profile=cloud-optimized",
+            roles=frozenset({"data"}),
+        )
+        for band in ("B04", "B8A", "SCL")
+    ]
+    assets.append(
+        Asset(
+            key="metadata",
+            primary=AssetLocation(href=f"{base_url}/MTD_MSIL2A.xml"),
+            media_type="application/xml",
+            roles=frozenset({"metadata"}),
+        )
+    )
+    if rgb_url is not None:
+        assets.append(
+            Asset(
+                key="rgb",
+                primary=AssetLocation(href=rgb_url),
+                media_type="image/png",
+                roles=frozenset({"visual", "thumbnail"}),
+            )
+        )
+    return asset_row(source, f"{source.granule_name.item()} corrected (L2A)", assets)
+
+
+def ndvi_metadata_row(source: xr.Dataset, ndvi_url: str, preview_url: str) -> xr.Dataset:
+    """Build a catalog record for the NDVI GeoTIFF and its public PNG preview."""
+    return asset_row(
+        source,
+        f"{source.granule_name.item()} NDVI",
+        [
+            Asset(
+                key="ndvi",
+                primary=AssetLocation(href=ndvi_url),
+                media_type="image/tiff; application=geotiff; profile=cloud-optimized",
+                roles=frozenset({"data"}),
+            ),
+            Asset(
+                key="preview",
+                primary=AssetLocation(href=preview_url),
+                media_type="image/png",
+                roles=frozenset({"visual", "thumbnail"}),
+            ),
+        ],
+    )
+
+
+def asset_row(source: xr.Dataset, title: str, assets: list[Asset]) -> xr.Dataset:
+    """Combine output assets and processing versions with the source scene's footprint, time, and ID."""
     fields = {
         "geometry": source.geometry.item(),
-        "title": product.name,
+        "title": title,
         "source_datapoint_id": str(source.id.item()),
         "pipeline_version": PIPELINE_VERSION,
         "sen2cor_version": SEN2COR_VERSION,

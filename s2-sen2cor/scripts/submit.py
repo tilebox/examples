@@ -13,15 +13,18 @@ def main(  # noqa: PLR0913 - these are the workflow's CLI inputs
     *,
     start: str = "2025-08-01",
     end: str = "2025-09-01",
-    bounds: tuple[float, float, float, float] = (54.2, 24.2, 54.6, 24.6),
+    bounds: tuple[float, float, float, float] = (1.1, 47.2, 1.3, 47.4),
     source: tuple[str, str] = ("open_data.copernicus.sentinel2_msi", "S2A_S2MSI1C"),
     destination: tuple[str, str] = ("tilebox.sentinel2_l2a", "S2A_L2A"),
     max_scenes: int = 3,
     max_cloud_cover: float = 20,
+    event_driven: bool = False,
+    ndvi_collection: str = "S2A_NDVI",
 ) -> None:
     """Submit a job. Bounds are west/south/east/north; end is exclusive.
 
     Source and destination each take a dataset slug followed by a collection name.
+    Event-driven jobs write NDVI to ndvi_collection in the destination dataset.
 
     Example: uv run scripts/submit.py --start 2025-08-01 --end 2025-09-01 --max-scenes 3
     """
@@ -38,6 +41,8 @@ def main(  # noqa: PLR0913 - these are the workflow's CLI inputs
                 destination=destination,
                 max_scenes=max_scenes,
                 max_cloud_cover=max_cloud_cover,
+                event_driven=event_driven,
+                ndvi_collection=ndvi_collection,
             ),
             cluster=os.getenv("TILEBOX_CLUSTER") or None,
         )
