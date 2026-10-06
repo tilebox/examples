@@ -1,7 +1,9 @@
+from pathlib import Path
+
 from tilebox.workflows import Client, Runner
 from tilebox.workflows.cache import LocalFileSystemCache
 
-from burn_scar_mapping.tasks import (
+from tasks import (
     ComputeDelta,
     ComputeNBR,
     MapBurnScars,
@@ -11,7 +13,7 @@ from burn_scar_mapping.tasks import (
 
 runner = Runner(
     tasks=[MapBurnScars, MosaicRGB, ComputeNBR, ComputeDelta, RenderOverlay],
-    cache=LocalFileSystemCache("cache"),
+    cache=LocalFileSystemCache(str(Path.home() / ".cache" / "tilebox" / "burn-scar-mapping")),
 )
 
 

@@ -3,6 +3,7 @@ from pathlib import Path
 import numpy as np
 from affine import Affine
 from PIL import Image
+from PIL.WebPImagePlugin import WebPImageFile
 
 from seasonal_rgb_timelapse.imagery import align_visual, encode_animated, lut, render_frame
 
@@ -27,7 +28,9 @@ def test_render_frame_writes_branded_square_image(tmp_path: Path) -> None:
 
     with Image.open(destination) as image:
         assert image.size == (300, 300)
-        assert max(image.getpixel((150, 150))) < 40
+        pixel = image.getpixel((150, 150))
+        assert isinstance(pixel, tuple)
+        assert max(pixel) < 40
         panel = np.asarray(image)[266:292, 8:292]
         assert np.count_nonzero(panel[:, :, 0] > 200) > panel.shape[0] * panel.shape[1] // 2
 
@@ -42,6 +45,7 @@ def test_encode_animated_writes_looping_webp(tmp_path: Path) -> None:
     encode_animated(frame_paths, destination)
 
     with Image.open(destination) as image:
+        assert isinstance(image, WebPImageFile)
         assert image.format == "WEBP"
         assert image.size == (32, 32)
         assert image.n_frames == 2

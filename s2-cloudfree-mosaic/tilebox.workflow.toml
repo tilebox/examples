@@ -5,10 +5,9 @@ runner = "runner:runner"
 
 [build]
 include = [
-    "tilebox.workflow.toml",
-    "pyproject.toml",
-    "uv.lock",
-    "runner.py",
-    "**/*.py",
+  "pyproject.toml",
+  "uv.lock",
+  "**/*.py",
 ]
+# Respect .gitignore when selecting files for the release.
 use_gitignore = true

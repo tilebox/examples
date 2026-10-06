@@ -10,40 +10,36 @@ import rasterio
 import xarray as xr
 from odc.geo.cog import write_cog
 from odc.geo.geobox import GeoBox
-from odc.geo.geom import box as geo_box
 from odc.geo.xr import wrap_xr
-from opentelemetry import trace
-from opentelemetry.sdk.trace import Span, TracerProvider
-from opentelemetry.sdk.trace.export import SimpleSpanProcessor
-from opentelemetry.sdk.trace.export.in_memory_span_exporter import InMemorySpanExporter
 from PIL import Image
 from rasterio.enums import ColorInterp
 from rasterio.transform import from_origin
 from rasterio.windows import Window
+from shapely import box
 from tilebox.datasets.assets import Asset, AssetCollection
 from tilebox.datasets.datasets.stac.v1.asset_metadata_pb import RasterProperties
 from tilebox.storage.aio import Client as StorageClient
 from tilebox.workflows.cache import LocalFileSystemCache
-from tilebox.workflows.observability.tracing import NoopWorkflowTracer
 from xarray.ufuncs import isfinite
 
-from burn_scar_mapping import imagery
-from burn_scar_mapping.imagery import (
+import imagery
+from imagery import (
+    _calibrate,
     burn_overlay,
-    calibrated,
     merge_observation,
     normalized_burn_ratio,
     output_grid,
     read_band,
+    read_cog_from_bytes,
     read_mosaic,
-    read_raster,
     render_rgb,
     render_rgba,
+    write_cog_to_bytes,
 )
 
 
 def test_calibration_masks_raw_nodata_before_offset() -> None:
-    actual = calibrated(np.array([[0, 1000, 2500, 6000]], dtype=np.uint16), 0, 0.0001, -0.1)
+    actual = _calibrate(np.array([[0, 1000, 2500, 6000]], dtype=np.uint16), 0, 0.0001, -0.1)
     np.testing.assert_allclose(actual, [[np.nan, 0, 0.15, 0.5]], atol=1e-7)
 
 
@@ -110,7 +106,7 @@ def test_reflectance_display_levels_gamma_and_nodata() -> None:
     np.testing.assert_array_equal(default[3], valid.astype(np.uint8) * 255)
 
 
-def test_read_aligns_different_resolution_and_partial_coverage() -> None:
+def test_read_band_returns_calibrated_native_grid_without_reprojection() -> None:
     class Source:
         crs = "EPSG:32629"
         transform = from_origin(600000, 4400040, 20, 20)
@@ -141,27 +137,23 @@ def test_read_aligns_different_resolution_and_partial_coverage() -> None:
         read_band(
             cast(StorageClient, Storage()),
             cast(Asset, asset),
-            GeoBox((4, 6), from_origin(599980, 4400040, 10, 10), "EPSG:32629"),
+            box(599980, 4399960, 600040, 4400040),
+            "EPSG:32629",
         )
     )
     assert isinstance(actual, xr.DataArray)
     assert actual.dims == ("y", "x")
-    assert actual.odc.geobox == GeoBox((4, 6), from_origin(599980, 4400040, 10, 10), "EPSG:32629")
+    assert actual.odc.geobox == GeoBox((2, 2), Source.transform, "EPSG:32629")
     assert np.isnan(actual.odc.nodata)
     np.testing.assert_allclose(
         actual,
-        [
-            [np.nan, np.nan, np.nan, np.nan, 0.1, 0.1],
-            [np.nan, np.nan, np.nan, np.nan, 0.1, 0.1],
-            [np.nan, np.nan, 0.3, 0.3, 0.5, 0.5],
-            [np.nan, np.nan, 0.3, 0.3, 0.5, 0.5],
-        ],
+        [[np.nan, 0.1], [0.3, 0.5]],
         atol=1e-7,
     )
     # SCL has a spatial resolution but no scale: absent protobuf scale must mean 1, not 0.
     asset.raster = RasterProperties(spatial_resolution=20)
     scl = asyncio.run(
-        read_band(cast(StorageClient, Storage()), cast(Asset, asset), GeoBox((2, 2), Source.transform, Source.crs))
+        read_band(cast(StorageClient, Storage()), cast(Asset, asset), box(600000, 4400000, 600040, 4400040), Source.crs)
     )
     np.testing.assert_allclose(scl, [[np.nan, 2000], [4000, 6000]])
 
@@ -176,14 +168,14 @@ def test_read_aligns_different_resolution_and_partial_coverage() -> None:
 def test_grid_uses_utm_and_requested_resolution(
     bounds: tuple[float, float, float, float], resolution: float, epsg: int
 ) -> None:
-    grid = output_grid(bounds, resolution)
+    area = box(*bounds)
+    grid = output_grid(area, resolution)
     assert grid.crs is not None
     assert grid.crs.epsg == epsg
     assert grid.transform.a == resolution
     assert grid.transform.e == -resolution
     assert grid.transform.c % resolution == grid.transform.f % resolution == 0
-    area = geo_box(*bounds, crs="EPSG:4326").to_crs(grid.crs, resolution=0.001)
-    assert grid.extent.contains(area)
+    assert grid.extent.contains(imagery.Geometry(area, crs="EPSG:4326").to_crs(grid.crs, resolution=0.001))
 
 
 @pytest.mark.parametrize(
@@ -193,16 +185,11 @@ def test_grid_uses_utm_and_requested_resolution(
 def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, product: str, keys: list[str]
 ) -> None:
-    bounds = (-7.9, 40.1, -7.7, 40.3)
-    grid = output_grid(bounds)
+    area = box(-7.9, 40.1, -7.7, 40.3)
+    grid = output_grid(area)
     height, width = grid.shape
     assert min(height, width) > 512  # Catch accidentally restoring a per-output-block read loop.
     calls = []
-    provider = TracerProvider()
-    exporter = InMemorySpanExporter()
-    provider.add_span_processor(SimpleSpanProcessor(exporter))
-    tracer = NoopWorkflowTracer()
-    monkeypatch.setattr(tracer, "_tracer", provider.get_tracer("test-mosaics"))
 
     class Source:
         crs = str(grid.crs)
@@ -214,9 +201,6 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
 
         async def read(self, *, window: Window) -> SimpleNamespace:
             calls.append((self.asset.scene, self.asset.key))
-            span = trace.get_current_span()
-            assert isinstance(span, Span)
-            assert span.name == f"S2B_T59VME_2026082{self.asset.scene}T235827_L2A"
             assert window.width == width
             assert window.height == height
             key, scene = self.asset.key, self.asset.scene
@@ -255,8 +239,7 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
 
     monkeypatch.setattr(imagery, "StorageClient", Storage)
     scenes = [cast(AssetCollection, assets(i)) for i in range(2)]
-    with tracer.span("mosaic task", attributes={"task_id": "test-task"}) as parent:
-        mosaic = asyncio.run(read_mosaic(scenes, grid, keys[:-1], tracer=tracer))
+    mosaic = asyncio.run(read_mosaic(scenes, grid, keys[:-1]))
     if product == "rgb":
         data = render_rgba(mosaic)
         write_cog(data, tmp_path / "rgb.tif", nodata=None, photometric="RGB", alpha="YES")
@@ -265,14 +248,6 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
         write_cog(data, tmp_path / "nbr.tif", nodata=np.nan)
     path = tmp_path / f"{product}.tif"
     assert calls == [(i, key) for i in range(2) for key in keys]
-    spans = exporter.get_finished_spans()[:-1]
-    assert [span.name for span in spans] == [f"S2B_T59VME_2026082{i}T235827_L2A" for i in range(2)]
-    for span in spans:
-        assert span.parent is not None
-        assert span.parent.span_id == parent.get_span_context().span_id
-        assert span.attributes is not None
-        assert span.attributes["task_id"] == "test-task"
-    provider.shutdown()
     with rasterio.open(path) as ds:
         assert ds.dataset_mask()[height * 3 // 4, width // 8] == 0  # Water.
         data = ds.read([1, 2, 3]) if product == "rgb" else ds.read()
@@ -293,11 +268,9 @@ def test_mosaic_reads_each_scene_asset_once_across_output_blocks(
 
 
 def test_empty_mosaics_preserve_georeferencing_and_nodata(tmp_path: Path) -> None:
-    bounds = (-7.9, 40.1, -7.7, 40.3)
-    grid = output_grid(bounds)
-    tracer = NoopWorkflowTracer()
-    nbr = normalized_burn_ratio(asyncio.run(read_mosaic([], grid, ["nir", "swir22"], tracer=tracer)))
-    rgba = render_rgba(asyncio.run(read_mosaic([], grid, ["red", "green", "blue"], tracer=tracer)))
+    grid = output_grid(box(-7.9, 40.1, -7.7, 40.3))
+    nbr = normalized_burn_ratio(asyncio.run(read_mosaic([], grid, ["nir", "swir22"])))
+    rgba = render_rgba(asyncio.run(read_mosaic([], grid, ["red", "green", "blue"])))
     write_cog(nbr, tmp_path / "nbr.tif", nodata=np.nan)
     write_cog(rgba, tmp_path / "rgb.tif", nodata=None, photometric="RGB", alpha="YES")
     paths = [tmp_path / "nbr.tif", tmp_path / "rgb.tif"]
@@ -319,46 +292,29 @@ def test_empty_mosaics_preserve_georeferencing_and_nodata(tmp_path: Path) -> Non
 def test_delta_and_png_keep_transparency_and_unknown_change(tmp_path: Path) -> None:
     cache = LocalFileSystemCache(tmp_path).group("job")
     grid = GeoBox((1, 6), from_origin(500000, 4000000, 20, 20), "EPSG:32635")
-    cache["before/nbr.tif"] = cast(
-        bytes,
-        write_cog(
-            wrap_xr(np.array([[0.6, 0.3, np.nan, 0.7, 0.8, 0.1]], dtype=np.float32), grid),
-            ":mem:",
-            nodata=np.nan,
-        ),
+    cache["before/nbr.tif"] = write_cog_to_bytes(
+        wrap_xr(np.array([[0.6, 0.3, np.nan, 0.7, 0.8, 0.1]], dtype=np.float32), grid)
     )
-    cache["after/nbr.tif"] = cast(
-        bytes,
-        write_cog(
-            wrap_xr(np.array([[0.1, 0.4, 0.2, np.nan, 0.2, 0.2]], dtype=np.float32), grid),
-            ":mem:",
-            nodata=np.nan,
-        ),
+    cache["after/nbr.tif"] = write_cog_to_bytes(
+        wrap_xr(np.array([[0.1, 0.4, 0.2, np.nan, 0.2, 0.2]], dtype=np.float32), grid)
     )
     rgb = np.full((3, 1, 6), 120, dtype=np.uint8)
     rgb[:, :, 5] = 0  # Valid black must remain opaque.
     alpha = np.array([[[255, 255, 255, 255, 0, 255]]], dtype=np.uint8)
-    cache["after/rgb.tif"] = cast(
-        bytes,
-        write_cog(
-            wrap_xr(np.concatenate([rgb, alpha]), grid, axis=1, dims=("band", "y", "x")),
-            ":mem:",
-            nodata=None,
-            photometric="RGB",
-            alpha="YES",
-        ),
+    cache["after/rgb.tif"] = write_cog_to_bytes(
+        wrap_xr(np.concatenate([rgb, alpha]), grid, axis=1, dims=("band", "y", "x")), rgba=True
     )
-    before = read_raster(cache["before/nbr.tif"])
-    after = read_raster(cache["after/nbr.tif"])
+    before = read_cog_from_bytes(cache["before/nbr.tif"])
+    after = read_cog_from_bytes(cache["after/nbr.tif"])
     assert np.isnan(before.odc.nodata)
     dnbr = before - after
-    cache["dnbr.tif"] = cast(bytes, write_cog(dnbr, ":mem:", nodata=np.nan))
+    cache["dnbr.tif"] = write_cog_to_bytes(dnbr)
     with Image.open(BytesIO(cache["after/rgb.tif"])) as image:
         overlay = burn_overlay(dnbr, image.convert("RGBA"), 0.27)
     with BytesIO() as buffer:
         overlay.save(buffer, format="PNG")
         cache["burn_overlay.png"] = buffer.getvalue()
-    result = read_raster(cache["dnbr.tif"])
+    result = read_cog_from_bytes(cache["dnbr.tif"])
     np.testing.assert_allclose(result, [[0.5, -0.1, np.nan, np.nan, 0.6, -0.1]], atol=1e-7)
     assert result.odc.geobox == grid
     with Image.open(BytesIO(cache["burn_overlay.png"])) as image:

@@ -172,10 +172,10 @@ class ComputeMosaicTile(Task):
                 mosaic = np.nanquantile(np.stack(observations), 0.25, axis=0)
             mosaic = np.nan_to_num(mosaic).clip(0, np.iinfo(np.uint16).max).astype(np.uint16)
 
-        output: zarr.Array = zarr.open_group(_output_store(context), mode="a")["mosaic"]  # type: ignore[assignment]
+        output = cast(zarr.Array, zarr.open_group(_output_store(context), mode="a")["mosaic"])
         output[:, y_slice, x_slice] = mosaic
         logger.info("Wrote mosaic tile")
         context.progress("mosaic-tiles").done(1)
 
 
-TASKS = [BuildMosaic, ComputeMosaicTile]
+TASKS: list[type[Task]] = [BuildMosaic, ComputeMosaicTile]

@@ -1,4 +1,4 @@
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock
 from uuid import UUID
@@ -37,12 +37,13 @@ def test_task_inputs_round_trip_native_geospatial_types() -> None:
         aoi=_square_aoi((48.2082, 16.3738), 5),
         output_name="output",
         season="March-May 2026",
-        season_start=datetime(2026, 3, 1, tzinfo=timezone.utc),
+        season_start=datetime(2026, 3, 1, tzinfo=UTC),
         datapoint_id=datapoint_id,
     )
 
     restored = RenderSeasonalFrame._deserialize(task._serialize())  # noqa: SLF001
 
+    assert isinstance(restored, RenderSeasonalFrame)
     assert restored.aoi.equals_exact(task.aoi, tolerance=0)
     assert restored.datapoint_id == datapoint_id
     assert restored.season_start == task.season_start
@@ -107,7 +108,7 @@ def test_season_name_for_cross_year_season() -> None:
     name, start = _season_name(xr.DataArray(datetime(2025, 12, 1)))
 
     assert name == "December 2025 - February 2026"
-    assert start == datetime(2025, 12, 1, tzinfo=timezone.utc)
+    assert start == datetime(2025, 12, 1, tzinfo=UTC)
 
 
 def test_season_name_within_one_year() -> None:

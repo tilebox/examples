@@ -11,32 +11,26 @@ dependencies = [
   "rasterio>=1.4.3",
   "shapely>=2.1.2",
   "tilebox",
-  "tilebox-datasets>=0.61.0",
-  "tilebox-workflows>=0.62.0",
+  "tilebox-datasets>=0.64.0",
+  "tilebox-workflows>=0.64.0",
   "xarray>=2025.9.0",
 ]
 
 [dependency-groups]
-dev = ["pytest>=8.4.1"]
-
-[tool.pytest.ini_options]
-pythonpath = ["."]
+dev = [
+  "pytest",
+  "ruff",
+  "ty",
+]
 
 [tool.ruff]
 # settings applying to all ruff subcommands, such as `ruff check` (lint) and `ruff format`
 line-length = 120
-target-version = "py310"
-exclude = [
-  "*/.venv/*",
-  # it's auto generated, don't lint it
-  "*/datasets/v1/*",
-  "*/datasets/stac/v1/*",
-  "*/workflows/v1/*",
-  "*/tilebox/v1/*",
-]
+extend-exclude = [".ipynb_checkpoints", "*.ipynb"]
 
 [tool.ruff.lint]
 select = ["ALL"]
+
 # all rules: https://beta.ruff.rs/docs/rules
 ignore = [
   # some ruff checking modules don't make much sense as a whole
@@ -54,8 +48,8 @@ ignore = [
   "G004",    # logging-f-string: allow usage of f-strings in logging calls
   "PLR2004", # magic-value-comparison: sometimes comparison with constants (e.g. 0) makes sense
   "TRY003",  # raise-vanilla-args: exceptions like this make sense in python
-  "TRY400",  # error-instead-of-exception: logger.error is ok with loguru
-  "CPY001",  # missing-copyright-notice: we don't add copyright notices to our source files
+  "TRY400",  # error-instead-of-exception: allow errors without a traceback
+  "CPY001",  # missing-copyright-notice: don't require copyright notices in every source file
   # disabled because of formatter
   "E501",   # line-too-long -> formatter takes care of this
   "ISC001", # single-line-implicit-str-concatenation -> formatter takes care of this

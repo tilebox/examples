@@ -7,7 +7,7 @@ runner = "runner:runner"
 include = [
   "pyproject.toml",
   "uv.lock",
-  "README.md",
-  "runner.py",
-  "burn_scar_mapping/**/*.py",
+  "**/*.py",
 ]
+# Respect .gitignore when selecting files for the release.
+use_gitignore = true
