@@ -8,6 +8,7 @@ include = [
   "pyproject.toml",
   "uv.lock",
   "**/*.py",
+  "assets/**",
 ]
 # Respect .gitignore when selecting files for the release.
 use_gitignore = true
