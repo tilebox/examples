@@ -1,0 +1,9 @@
+[workflow]
+# Replace with the slug returned by `tilebox workflow create` before publishing.
+slug = "local-storage-thumbnails"
+root = "."
+runner = "workflow:runner"
+
+[build]
+include = ["pyproject.toml", "uv.lock", "workflow.py"]
+use_gitignore = true
