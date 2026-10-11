@@ -1,0 +1,12 @@
+services:
+  nodeodm:
+    image: opendronemap/nodeodm:3.6.2
+    command: ["--parallel_queue_processing", "1", "--max_concurrency", "2"]
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - nodeodm-data:/var/www/data
+    restart: unless-stopped
+
+volumes:
+  nodeodm-data:
