@@ -15,8 +15,8 @@ This workflow queries credentials-free Sentinel-2 L2A COGs from AWS Earth Search
 1. Shared bucket
 
 Since this workflow can be run in a distributed manner, the output dataset and workflow cache are written into a shared bucket.
-This example is configured for GCS; set the `ZARR_GCS_BUCKET` and `ZARR_GCS_PROJECT` constants in
-`s2_cloudfree_mosaic/tasks.py` to the bucket and project you want to use.
+This example is configured for GCS; set `ZARR_GCS_BUCKET` in `s2_cloudfree_mosaic/tasks.py` to the bucket you want to use.
+Both the output dataset and workflow cache use obstore with Google Application Default Credentials.
 
 > [!TIP]  
 > If you only run tasks on a single machine, you can use a local filesystem cache instead.

@@ -1,7 +1,7 @@
 [project]
 name = "burn-scar-mapping"
 version = "0.1.0"
-description = "Add your description here"
+description = "Identify likely burn scars by comparing Sentinel-2 imagery before and after a fire, and highlight them on a satellite image."
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
@@ -12,8 +12,9 @@ dependencies = [
   "pillow>=12.3.0",
   "rasterio>=1.5.1",
   "shapely>=2.1.2",
-  "tilebox",
-  "tilebox-workflows>=0.64.0",
+  "tilebox-datasets>=0.68.0",
+  "tilebox-storage>=0.68.0",
+  "tilebox-workflows>=0.68.0",
   "xarray>=2026.9.0",
 ]
 

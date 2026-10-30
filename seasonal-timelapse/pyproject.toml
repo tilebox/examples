@@ -11,8 +11,9 @@ dependencies = [
   "rasterio>=1.4.3",
   "shapely>=2.1.2",
   "tilebox",
-  "tilebox-datasets>=0.64.0",
-  "tilebox-workflows>=0.64.0",
+  "tilebox-datasets>=0.68.0",
+  "tilebox-storage>=0.68.0",
+  "tilebox-workflows>=0.68.0",
   "xarray>=2025.9.0",
 ]
 

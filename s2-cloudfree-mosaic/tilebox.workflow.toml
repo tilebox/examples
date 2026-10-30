@@ -1,5 +1,7 @@
 [workflow]
-slug = "sentinel-2-cloudfree-mosaic-F8yVcPRfw2AkoZ"
+slug = "sentinel-2-cloudfree-mosaic"
+name = "Sentinel-2 Cloud-Free Mosaic"
+description = "Combine Sentinel-2 observations into a cloud-masked, natural-color mosaic for a chosen area and date range."
 root = "."
 runner = "runner:runner"
 

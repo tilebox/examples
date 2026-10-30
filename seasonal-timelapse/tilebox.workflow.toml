@@ -1,5 +1,7 @@
 [workflow]
-slug = "seasonal-rgb-timelapse-AGimUihHGGahtT"
+slug = "seasonal-rgb-timelapse"
+name = "Seasonal RGB Timelapse"
+description = "Build low-cloud seasonal Sentinel-2 RGB timelapses"
 root = "."
 runner = "runner:runner"
 

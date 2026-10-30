@@ -5,7 +5,6 @@ import numpy as np
 import rasterio.warp
 import zarr
 from affine import Affine
-from google.cloud.storage import Client as GoogleStorageClient
 from obstore.auth.google import GoogleCredentialProvider
 from obstore.store import GCSStore, ObjectStore
 from odc.geo import CRS, Geometry, Resolution
@@ -17,14 +16,13 @@ from tilebox.datasets.query import TimeInterval, field
 from tilebox.storage.aio import open_geotiff
 from tilebox.storage.geotiff import window_from_bounds
 from tilebox.workflows import ExecutionContext, Task
-from tilebox.workflows.cache import GoogleStorageCache
+from tilebox.workflows.cache import ObstoreCache
 from zarr.codecs import BloscCodec
 from zarr.storage import ObjectStore as ZarrObjectStore
 
 DATASET_SLUG = "open_data.aws_earth.sentinel2"
 COLLECTION = "L2A"
 ZARR_GCS_BUCKET = "vci-datacube-bucket-1513742"
-ZARR_GCS_PROJECT = "careful-striker-387117"
 CACHE_PREFIX = "s2-mosaic"
 TILE_SHAPE = (1024, 1024)
 RGB_ASSETS = ("red", "green", "blue")
@@ -37,9 +35,8 @@ def zarr_storage(prefix: str) -> ObjectStore:
     return GCSStore(bucket=ZARR_GCS_BUCKET, prefix=prefix, credential_provider=GoogleCredentialProvider())
 
 
-def workflow_cache() -> GoogleStorageCache:
-    bucket = GoogleStorageClient(project=ZARR_GCS_PROJECT).bucket(ZARR_GCS_BUCKET)
-    return GoogleStorageCache(bucket, prefix=CACHE_PREFIX)
+def workflow_cache() -> ObstoreCache:
+    return ObstoreCache(zarr_storage(CACHE_PREFIX))
 
 
 def _output_prefix(context: ExecutionContext) -> str:

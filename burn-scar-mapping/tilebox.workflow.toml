@@ -1,5 +1,7 @@
 [workflow]
-slug = "burn-scar-mapping-EngRbLn7Zb8iSa"
+slug = "burn-scar-mapping"
+name = "Burn Scar Mapping"
+description = "Identify likely burn scars by comparing Sentinel-2 imagery before and after a fire, and highlight them on a satellite image."
 root = "."
 runner = "runner:runner"
 
