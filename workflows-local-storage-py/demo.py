@@ -97,7 +97,7 @@ def import_photos(*, batch: str = "take-01", interval: float = 0) -> None:
 def check() -> None:
     """Process samples directly; does not test Tilebox orchestration."""
     for photo in sample_paths():
-        report = make_thumbnail(photo.read_bytes(), photo.name, str(ROOT / "results" / "check"))
+        report = make_thumbnail(photo.read_bytes(), photo.name, str(ROOT / "results"))
         print(json.dumps(report))
     print("Processed 3 photos directly; no watcher, automation, or runner was used")
 
@@ -123,13 +123,13 @@ def register(*, location: str, cluster: str) -> None:
         )
     automation = client.automations().create_storage_event_automation(
         name,
-        MakeThumbnail(output_dir=str(ROOT / "results" / "native")),
+        MakeThumbnail(output_dir=str(ROOT / "results")),
         (storage, "**.[jJ][pP][gG]"),
         cluster=cluster,
         max_retries=2,
     )
     print(f"Created automation: {automation.id}")
-    print(f"Results: {ROOT / 'results' / 'native'}")
+    print(f"Results: {ROOT / 'results'}")
 
 
 def main() -> None:
