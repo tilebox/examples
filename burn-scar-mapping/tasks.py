@@ -1,9 +1,13 @@
+import hashlib
+import os
 from datetime import datetime
 from io import BytesIO
 from pathlib import Path
+from urllib.parse import quote, urlsplit
 from uuid import uuid4
 
 import cloudpickle
+import niquests
 import numpy as np
 from odc.geo.geobox import GeoBox
 from PIL import Image
@@ -219,3 +223,22 @@ class RenderOverlay(Task):
         path = Path.home() / f"burn_overlay_{uuid4().hex}.png"
         path.write_bytes(png)
         context.logger.info("Saved burn-scar overlay", key="burn_overlay.png", path=str(path))
+        with context.tracer.span("upload"):
+            url = _upload_overlay(png)
+        context.logger.info("Burn-scar overlay uploaded", url=url)
+
+
+def _upload_overlay(png: bytes) -> str:
+    """Upload the PNG through Tilebox's private-preview workflow storage API."""
+    api_url = (os.environ.get("TILEBOX_API_URL") or "https://api.tilebox.com").rstrip("/")
+    digest = hashlib.sha256(png).hexdigest()
+    response = niquests.put(
+        f"{api_url}/v1/storage/{digest}/burn_overlay.png",
+        data=png,
+        headers={"Authorization": f"Bearer {os.environ['TILEBOX_API_KEY']}", "Content-Type": "image/png"},
+        timeout=60,
+    )
+    response.raise_for_status()
+    domain = urlsplit(api_url).netloc.removeprefix("api.")
+    path = quote(response.json()["path"].lstrip("/"), safe="/%")
+    return f"https://workflow-storage.{domain}/{path}"

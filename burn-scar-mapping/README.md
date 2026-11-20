@@ -30,7 +30,7 @@ tilebox job submit \
   }'
 ```
 
-Change the polygon and date windows to analyze another area. Inspect progress in Console; the overlay task logs the output PNG's path on the runner's machine.
+Change the polygon and date windows to analyze another area. Open the job logs in Console and click the URL in the `Burn-scar overlay:` message to view the PNG in Tilebox-hosted storage. The overlay task also logs the local path on the runner.
 
 ## Four processing tasks
 
